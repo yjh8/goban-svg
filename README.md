@@ -85,7 +85,7 @@ the extractor's regression fixtures (`tests/test_real_examples.py`).
 
 ```bash
 uv sync --dev
-uv run pytest            # 300+ tests, no external fixtures needed (see below)
+uv run pytest            # 400+ tests, no external fixtures needed (see below)
 uv run ruff check . && uv run ruff format --check .
 ```
 
@@ -112,6 +112,8 @@ contracts), `docs/build-learnings.md` (what went wrong and why, worth reading fi
 | `examples/` | tracked | The three source screenshots + verified `.json`/`.svg`/`.sgf` outputs (the gallery + regression fixtures) |
 | `screenshots/` | **gitignored** | Raw input inbox for board screenshots (curated copies go to `examples/`) |
 | `outputs/` | **gitignored** | Transient artifacts (previews, spike logs) |
+| `session_logs/` | tracked | Per-session provenance logs + changelog archives (fleet doc lifecycle) |
+| `session_handoff/` | tracked | Starter-prompt handoffs for the next session (fleet doc lifecycle) |
 | `.github/workflows/` | tracked | CI: ruff check + format + pytest on Python 3.10/3.13 |
 
 > Rule: any new top-level file or directory gets a row here **in the same commit** (fleet taxonomy standard).

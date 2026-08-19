@@ -3,6 +3,15 @@
 > What actually went wrong (failure modes, not just fixes), so the next session doesn't
 > rediscover them. Newest first.
 
+## ruff's format gate covers markdown code blocks (2026-08-19b)
+
+CI went red after shipping because `ruff format --check .` (ruff 0.16) formats
+the ```python blocks inside `docs/*.md` — hand-written doc snippets with
+non-standard comment spacing fail the gate even when all real code is clean.
+Rule: after editing any doc containing python code fences, run
+`uv run ruff format .` before committing. (Also the reminder that bit twice
+today: local "ruff clean" runs BEFORE later doc edits prove nothing about them.)
+
 ## 2026-08-19 — First implementation: what reality disagreed with
 
 The full package was built in one session (7-agent parallel build to the locked design,
