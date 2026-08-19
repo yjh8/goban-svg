@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>棋譜圖轉換器</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='42' fill='%23222'/%3E%3C/svg%3E">
+</head>
+<body>
+<main>
+  <header>
+    <h1>圍棋棋盤圖片 → 棋譜圖</h1>
+    <p class="sub">上傳棋盤截圖，自動辨識盤面，產生清晰的 SVG 棋譜圖。App 截圖效果最佳；實體棋盤照片為實驗性支援。</p>
+  </header>
+
+  <section id="upload-section" aria-label="上傳棋盤圖片">
+    <label id="dropzone" for="file-input" tabindex="0">
+      <input type="file" id="file-input" accept="image/*">
+      <span id="dropzone-text">拖曳圖片到這裡，或點擊選擇檔案</span>
+      <img id="preview" alt="已選擇的棋盤圖片預覽" hidden>
+    </label>
+    <button id="convert-btn" disabled>轉換成棋譜圖</button>
+    <p id="status" role="status" aria-live="polite"></p>
+    <div id="error-box" role="alert" hidden>
+      <p id="error-main"></p>
+      <details><summary>技術詳情</summary><pre id="error-detail"></pre></details>
+    </div>
+  </section>
+
+  <section id="result-section" aria-label="辨識結果" hidden>
+    <h2>辨識結果</h2>
+    <p id="summary"></p>
+
+    <div id="warnings-box" hidden>
+      <h3>請人工確認</h3>
+      <ul id="warnings-list"></ul>
+      <details><summary>技術訊息（原文）</summary><pre id="warnings-raw"></pre></details>
+    </div>
+
+    <div class="view-toggle" role="tablist" aria-label="檢視切換">
+      <button id="tab-original" role="tab" aria-selected="false" aria-controls="pane-original">原圖</button>
+      <button id="tab-diagram" role="tab" aria-selected="true" aria-controls="pane-diagram" class="active">棋譜圖</button>
+    </div>
+    <div id="compare">
+      <figure id="pane-original" class="pane" role="tabpanel" aria-labelledby="tab-original" hidden>
+        <img id="original-img" alt="原始棋盤圖片">
+        <figcaption>原圖</figcaption>
+      </figure>
+      <figure id="pane-diagram" class="pane" role="tabpanel" aria-labelledby="tab-diagram">
+        <div id="svg-holder"></div>
+        <figcaption>棋譜圖（含座標，供對照確認）</figcaption>
+      </figure>
+    </div>
+
+    <div id="downloads">
+      <a id="dl-svg" class="btn" download="goban-board.svg">下載 SVG 棋譜圖</a>
+      <a id="dl-json" class="btn" download="goban-board.json">下載 JSON（可修正）</a>
+      <a id="dl-sgf" class="btn" download="goban-board.sgf">下載 SGF 棋譜<small>（靜態盤面，記號顏色不保留）</small></a>
+    </div>
+
+    <details id="editor-details">
+      <summary>修正辨識結果（編輯 JSON 後重新產生）</summary>
+      <p class="hint">若辨識有誤（例如手數讀錯、棋子顏色錯誤），可直接修改下方 JSON —
+        棋子座標格式如 <code>"D14"</code>（直行 A–T 略過 I，橫列由下往上數）— 然後按「套用修正並重新產生」。</p>
+      <textarea id="json-editor" rows="14" spellcheck="false" aria-label="盤面 JSON 編輯器"></textarea>
+      <div class="editor-actions">
+        <label class="btn file-btn">匯入 JSON 檔<input type="file" id="json-import" accept=".json,application/json"></label>
+        <button id="rerender-btn" class="btn">套用修正並重新產生</button>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <p>圖片僅在您的瀏覽器中處理，<strong>不會上傳到任何伺服器</strong>。</p>
+    <p>辨識有誤？轉換後可在<a href="#editor-details">「修正辨識結果」</a>直接編輯 JSON 重新產生。</p>
+    <p id="version-line"></p>
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

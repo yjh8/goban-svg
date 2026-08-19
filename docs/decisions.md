@@ -2,6 +2,39 @@
 
 > Temporal decision log. Newest first. Minor decisions are single bullets.
 
+## D-005 — Web app phase 1: static Cloudflare Pages + client-side Pyodide, zh-TW UI (2026-08-19)
+
+**Status:** ACTIVE (shipped — https://goban-svg.pages.dev)
+**Valid from:** 2026-08-19
+**Supersedes:** —
+**Phase:** execute
+**Confidence:** high
+
+### Context
+D-004's phase 1: a shareable web converter for the 海峰棋院 staff, no auth yet. The
+package is pure-stdlib Python; the audience uses phones and desktops in zh-TW.
+
+### Decision
+No backend at all: Cloudflare Pages serves a static site; **Pyodide (pinned 314.0.5,
+self-hosted)** runs the real `goban_svg` wheel in the visitor's browser inside a
+persistent Web Worker; the browser's canvas decodes any uploadable format (incl. EXIF
+rotation) into raw RGB handed to Python. UI is 繁體中文 with 圍棋 terminology (棋譜圖、
+手數、記號). The CLI's correction loop exists in-page (JSON editor → 套用修正並重新產生).
+Strict CSP (`connect-src 'self'`) makes 「圖片不會上傳到任何伺服器」 enforced, not
+aspirational. Deploys via `scripts/deploy-web.sh` (deterministic wheel+version staging).
+Full rationale + review amendments: `docs/webapp-design.md` (Codex design review
+APPROVE-10, all findings folded in before implementation).
+
+### Alternatives considered
+- Cloudflare Python Workers — CPU limits vs multi-second extraction, beta runtime.
+- Python server elsewhere — moving parts + images leave the browser for nothing.
+- JS port — drift from the regression-fixed Python.
+
+### Implementation
+`web/` + `scripts/deploy-web.sh`; E2E-verified live (boot under CSP, board-1 exact
+summary, JSON re-render, zh-TW error paths). Phase 2 = Cloudflare Access with Google
+IdP over production + preview hostnames (matrix in webapp-design.md amendment 9).
+
 ## D-004 — Web app with Google authentication (planned; auth deferred) (2026-08-19)
 
 **Status:** ACTIVE (planned — next workstream)

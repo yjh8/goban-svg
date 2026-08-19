@@ -112,6 +112,9 @@ contracts), `docs/build-learnings.md` (what went wrong and why, worth reading fi
 | `examples/` | tracked | The three source screenshots + verified `.json`/`.svg`/`.sgf` outputs (the gallery + regression fixtures) |
 | `screenshots/` | **gitignored** | Raw input inbox for board screenshots (curated copies go to `examples/`) |
 | `outputs/` | **gitignored** | Transient artifacts (previews, spike logs) |
+| `web/` | tracked | The zh-TW web app (static; Pyodide runs the package in-browser) → goban-svg.pages.dev |
+| `scripts/` | tracked | `deploy-web.sh` — deterministic build + stage + Cloudflare Pages deploy |
+| `web-dist/` | **gitignored** | Deploy staging built by `scripts/deploy-web.sh` (wheel + self-hosted Pyodide) |
 | `session_logs/` | tracked | Per-session provenance logs + changelog archives (fleet doc lifecycle) |
 | `session_handoff/` | tracked | Starter-prompt handoffs for the next session (fleet doc lifecycle) |
 | `.github/workflows/` | tracked | CI: ruff check + format + pytest on Python 3.10/3.13 |

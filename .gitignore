@@ -16,3 +16,7 @@ __pycache__/
 
 # --- macOS ---
 .DS_Store
+
+# --- Web deploy staging (rebuilt by scripts/deploy-web.sh) ---
+/web-dist/
+/.wrangler/

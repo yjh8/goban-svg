@@ -2,26 +2,30 @@
 
 ## In Progress
 
-_(nothing in flight — v0.1.0 shipped 2026-08-19)_
+1. **Staff verification round** — Joseph shared https://goban-svg.pages.dev with the
+   海峰棋院 team (2026-08-19 evening). Collect: more test examples + correctness
+   verification (Joseph doesn't read Go positions). Every verified case → `examples/`
+   regression fixture (D-003); every failure → original image + what's wrong.
+2. **Web app code-review follow-ups** — Codex review of `web/` ran at landing; apply
+   any findings and redeploy (same URL).
 
-## Backlog (next session first)
+## Backlog
 
-1. **Hands-on testing round** — Joseph tries the tool on fresh screenshots
-   (`uv run goban-svg convert <file>`); fix anything reality turns up. New
-   verified boards should ALSO land in `examples/` as regression fixtures (D-003).
-2. **Web app, phase 1 (no auth)** — upload screenshot → SVG/JSON/SGF in the
-   browser. Design session first: stack + hosting (fleet default hypothesis:
-   Cloudflare Workers/Pages; note the extractor is pure stdlib Python — runtime
-   choice matters), UI shape, correction-loop UX (edit JSON → re-render).
-   Codex design review before implementing (fleet gate).
-3. **Web app, phase 2 (auth)** — Google sign-in, ONLY after phase 1 is fully
-   functional and tested (D-004 sequencing).
-4. (Deferred, small) Codex re-verification round for a clean `APPROVE-0`
-   receipt — round 1 + fixes are stamped; the re-run was stopped mid-flight
-   on 2026-08-19.
+1. **Web app, phase 2 (auth)** — Cloudflare Access + Google IdP over production AND
+   preview hostnames (matrix in webapp-design.md amendment 9). ONLY after the team
+   confirms phase 1 works (D-004 sequencing).
+2. Warning i18n hardening — stable warning codes from the extractor instead of the
+   zh-TW regex map in app.js (drift risk, design amendment 11).
+3. Real-board photo support — decide after seeing staff photo examples (perspective
+   rectification is a new extraction stage; currently fails loud with zh-TW guidance).
+4. (Deferred, small) Codex re-verification round for a clean `APPROVE-0` receipt on
+   the v0.1.0 CLI diff — round 1 + fixes are stamped; the re-run was stopped mid-flight.
 
 ## Done
 
+- 2026-08-19 (evening) — **Web app phase 1 shipped**: goban-svg.pages.dev live —
+  static Pages + self-hosted Pyodide, zh-TW UI, in-page JSON correction loop, strict
+  CSP, E2E-verified in Chrome (D-005). Design review APPROVE-10 folded in pre-build.
 - 2026-08-19 — v0.1.0: full pipeline (board/png_codec/digits/sgf/render/extract/cli),
   427 tests + CI green, acceptance passed on all three real screenshots,
   design+code review cascade findings all fixed, examples/ gallery committed.
