@@ -1,0 +1,15 @@
+# --- Python (uv) — root-anchored per fleet D-222 lesson ---
+/.venv/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+/dist/
+/*.egg-info/
+__pycache__/
+*.pyc
+
+# --- Generated / transient (never source-of-truth) ---
+/outputs/
+
+# --- macOS ---
+.DS_Store
