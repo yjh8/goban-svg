@@ -278,11 +278,81 @@ def test_svg_triangle_mark_is_a_hollow_polygon_in_the_mark_color() -> None:
     assert len(polygons[0].get("points", "").split()) == 3
 
 
+def test_svg_circle_mark_on_a_stone_paints_no_wood_over_it() -> None:
+    # R2's SVG half: the ring is hollow (fill="none"), so the stone underneath
+    # shows through. Nothing may paint wood onto a stone at any radius.
+    pos = Position(size=19, stones={Point(10, 10): "white"}, marks={Point(10, 10): Mark("circle", "black")})
+    root = _root(render_svg(pos, cell=36.0))
+    circles = _find(root, "circle")
+
+    rings = [c for c in circles if c.get("stroke") == "#1a1a1a"]
+    assert len(rings) == 1
+    assert rings[0].get("fill") == "none", "a filled ring would hide the stone it annotates"
+    assert [c for c in circles if c.get("fill") == "#e6c37a"] == [], "no wood disc belongs on a stone"
+
+
 def test_svg_hollow_mark_on_empty_point_gets_a_wood_backing_disc() -> None:
     pos = Position(size=19, marks={Point(4, 4): Mark("triangle", "black")})
     root = _root(render_svg(pos, cell=36.0))
     backing = [c for c in _find(root, "circle") if c.get("fill") == "#e6c37a"]
     assert len(backing) == 1, "grid lines must not run through a hollow mark"
+
+
+# --------------------------------------------------------------------------- #
+# R1 -- a label and a mark on the SAME empty point must both survive. Labels are
+# drawn after marks, so the label's wood backing disc used to be painted over
+# the mark, erasing it while the file still validated and the tool reported
+# success.
+# --------------------------------------------------------------------------- #
+
+
+def _indexed(root: ET.Element, tag: str) -> list[tuple[int, ET.Element]]:
+    """(document position, element) for every direct child of `root` with `tag`."""
+    return [(i, e) for i, e in enumerate(root) if e.tag == f"{SVG_NS}{tag}"]
+
+
+def test_svg_label_on_an_empty_point_does_not_bury_a_hollow_mark() -> None:
+    point = Point(4, 4)
+    pos = Position(size=19, marks={point: Mark("triangle", "black")}, labels={point: "7"})
+    root = _root(render_svg(pos, cell=36.0))
+
+    polygons = _indexed(root, "polygon")
+    texts = _indexed(root, "text")
+    wood_discs = [(i, e) for i, e in _indexed(root, "circle") if e.get("fill") == "#e6c37a"]
+
+    assert len(polygons) == 1, "the triangle must still be in the document"
+    assert [e.text for _, e in texts] == ["7"], "the label must still be in the document"
+    assert len(wood_discs) == 1, "one backing disc for the point -- not one per layer"
+    assert wood_discs[0][0] < polygons[0][0] < texts[0][0], (
+        "draw order must go backing disc -> mark -> label; a disc after the mark erases it"
+    )
+
+
+def test_svg_label_on_an_empty_point_does_not_bury_a_filled_mark() -> None:
+    # A filled square on an empty point never had a backing disc of its own (it
+    # IS its own backing), so the label must not add one either.
+    cell = 36.0
+    point = Point(4, 3)
+    pos = Position(size=19, marks={point: Mark("square", "black")}, labels={point: "7"})
+    root = _root(render_svg(pos, cell=cell))
+
+    squares = [(i, e) for i, e in _indexed(root, "rect") if e.get("fill") not in (None, "none", "#e6c37a")]
+    texts = _indexed(root, "text")
+    wood_discs = [(i, e) for i, e in _indexed(root, "circle") if e.get("fill") == "#e6c37a"]
+
+    assert len(squares) == 1
+    assert abs(float(squares[0][1].get("width", "0")) - 2 * 0.21 * cell) < 1e-6, "the square is intact, not shrunk"
+    assert [e.text for _, e in texts] == ["7"]
+    assert wood_discs == [], "a disc over a filled mark would erase it"
+    assert squares[0][0] < texts[0][0]
+
+
+def test_svg_label_on_a_bare_empty_point_still_gets_its_backing_disc() -> None:
+    # The fix must not throw the disc away in the case it exists for: with no
+    # mark to hide behind, grid lines would otherwise run through the glyph.
+    pos = Position(size=19, labels={Point(4, 4): "7"})
+    root = _root(render_svg(pos, cell=36.0))
+    assert len([c for c in _find(root, "circle") if c.get("fill") == "#e6c37a"]) == 1
 
 
 def test_svg_is_wellformed_for_a_rich_position() -> None:
@@ -365,37 +435,80 @@ def test_png_black_stone_is_glossy_but_the_highlight_is_not_a_phantom_glyph() ->
 
     window = int(0.30 * cell)  # the OCR mask half-width
     lums = [
-        _lum(img.get(px, py))
-        for py in range(y - window, y + window + 1)
-        for px in range(x - window, x + window + 1)
+        _lum(img.get(px, py)) for py in range(y - window, y + window + 1) for px in range(x - window, x + window + 1)
     ]
     assert max(lums) > 200, "black stones must show a specular highlight"
     assert sum(1 for value in lums if value >= 180) < 8, "the bright core must stay under the speck floor"
 
 
+def _wedge_corner(point: Point) -> tuple[int, int]:
+    """The painter's deterministic per-point corner choice (render.py)."""
+    return ((-1, -1), (1, -1), (-1, 1), (1, 1))[(point.col * 7 + point.row * 13) % 4]
+
+
 def test_png_triangle_mark_is_a_corner_wedge_the_extractor_can_confirm() -> None:
-    # The load-bearing geometry: extract.py finds the wedge with a patch at
-    # (0.33c, 0.33c) up-left of the stone center and CONFIRMS it with an inner
-    # probe at (0.23c, 0.23c). A wedge with 0.5c legs passes the first and fails
-    # the second, so both offsets are asserted here.
+    # The load-bearing geometry (measured from the real screenshots): the badge is
+    # a solid blob confined to ONE quadrant of the stone's cell, with some pixel
+    # reaching >= 0.38c from the stone center on an axis -- that is what
+    # extract.py's component test accepts. Pixels near the center (the specular
+    # highlight) are excluded here the way quadrant purity excludes them there.
     cell = 32
     size = 19
     point = Point(10, 10)
     pos = Position(size=size, stones={point: "black"}, marks={point: Mark("triangle", "white")})
     img = render_png(pos, cell=cell)
     x, y = _png_xy(size, cell, point)
+    sx, sy = _wedge_corner(point)
 
-    for ratio in (0.33, 0.23):
-        px, py = x - int(round(ratio * cell)), y - int(round(ratio * cell))
-        r, g, b = img.get(px, py)
-        assert _lum((r, g, b)) > 195 and abs(r - b) < 45, f"white wedge missing at diagonal offset {ratio}c"
+    def badge_pixels(qx: int, qy: int) -> list[tuple[int, int]]:
+        win = int(0.55 * cell)
+        out = []
+        for dy in range(-win, win + 1):
+            for dx in range(-win, win + 1):
+                if qx * dx < 0 or qy * dy < 0 or max(abs(dx), abs(dy)) <= int(0.25 * cell):
+                    continue
+                r, g, b = img.get(x + dx, y + dy)
+                if _lum((r, g, b)) > 195 and abs(r - b) < 45:
+                    out.append((dx, dy))
+        return out
 
-    # The wedge sits at ONE cell corner: the opposite diagonal is bare stone at the
-    # inner probe, and bare (warm, so not white-badge -- gotcha G1) wood further out.
-    r, g, b = img.get(x + int(round(0.23 * cell)), y + int(round(0.23 * cell)))
-    assert _lum((r, g, b)) < 115, "bottom-right inner probe must still be plain black stone"
-    r, g, b = img.get(x + int(round(0.33 * cell)), y + int(round(0.33 * cell)))
-    assert not (_lum((r, g, b)) > 195 and abs(r - b) < 45), "wood must never read as a white badge"
+    wedge = badge_pixels(sx, sy)
+    assert len(wedge) >= int(0.015 * cell * cell), "badge must clear the extractor's minimum-area floor"
+    assert any(max(abs(dx), abs(dy)) >= 0.38 * cell for dx, dy in wedge), "badge must reach toward its corner"
+    assert badge_pixels(-sx, -sy) == [], "the opposite quadrant must stay bare -- one corner only"
+
+
+def _is_badge_pixel(rgb: tuple[int, int, int]) -> bool:
+    """extract.py's per-pixel test for a bright, neutral badge (wood is warm)."""
+    r, _g, b = rgb
+    return _lum(rgb) > 195 and abs(r - b) < 45
+
+
+def test_png_wedge_corner_varies_per_point_as_documented() -> None:
+    # R3: the painter deliberately picks a different cell corner per point (the
+    # real app's badge moves around, and the fixtures should exercise every
+    # quadrant of the extractor). The docstring used to promise "the top-left
+    # corner of the stone's cell", which is a claim about behavior that is not
+    # true of any of these four points as a group.
+    assert "top-left" not in (render_png.__doc__ or ""), "the painter varies the corner; the docstring must not fix it"
+
+    cell = 32
+    size = 19
+    points = [Point(4, 4), Point(5, 4), Point(4, 5), Point(5, 5)]
+    assert len({_wedge_corner(p) for p in points}) > 1, "these points must not all land on one corner"
+
+    pos = Position(
+        size=size,
+        stones=dict.fromkeys(points, "black"),
+        marks={p: Mark("triangle", "white") for p in points},
+    )
+    img = render_png(pos, cell=cell)
+    off = int(round(0.40 * cell))  # inside the wedge for any leg in the real 0.31c-0.45c band
+    for point in points:
+        x, y = _png_xy(size, cell, point)
+        sx, sy = _wedge_corner(point)
+        assert _is_badge_pixel(img.get(x + sx * off, y + sy * off)), f"badge missing at {point.notation()}"
+        assert not _is_badge_pixel(img.get(x - sx * off, y - sy * off)), f"badge in two corners at {point.notation()}"
 
 
 def test_png_wedge_colors_survive_hex_and_named_marks() -> None:
@@ -408,15 +521,18 @@ def test_png_wedge_colors_survive_hex_and_named_marks() -> None:
         marks={blue: Mark("triangle", "#2b5fe3"), red: Mark("triangle", "#e03c3c")},
     )
     img = render_png(pos, cell=cell)
-    offset = int(round(0.33 * cell))
 
-    bx, by = _png_xy(size, cell, blue)
-    r, g, b = img.get(bx - offset, by - offset)
-    assert (b - r) > 50 and b > 120, "blue wedge per extract.py's per-pixel classifier"
-
-    rx, ry = _png_xy(size, cell, red)
-    r, g, b = img.get(rx - offset, ry - offset)
-    assert (r - g) > 80 and r > 140, "red wedge per extract.py's per-pixel classifier"
+    # 0.40c diagonal into the painted corner is inside the triangle for any leg
+    # in the real 0.31c-0.45c band (0.10c + 0.10c from the corner < leg).
+    off = int(round(0.40 * cell))
+    for pt, check, name in (
+        (blue, lambda r, g, b: b - r > 50 and b > 120, "blue"),
+        (red, lambda r, g, b: r - g > 80 and r > 140, "red"),
+    ):
+        x, y = _png_xy(size, cell, pt)
+        sx, sy = _wedge_corner(pt)
+        r, g, b = img.get(x + sx * off, y + sy * off)
+        assert check(r, g, b), f"{name} wedge at {pt.notation()} per extract.py's per-pixel classifier"
 
 
 def test_png_square_mark_on_empty_covers_the_disc_but_not_the_ring() -> None:
@@ -447,6 +563,33 @@ def test_png_square_mark_on_a_stone_stays_hollow() -> None:
     assert _median(_disc_lums(img, x, y, 0.20 * cell)) > 150
 
 
+def test_png_circle_mark_interior_is_whatever_lies_under_it() -> None:
+    # R2: the ring is painted as a filled disc with the background punched back
+    # out of its middle, so the punch color has to match what is actually there.
+    # Punching wood into a white stone leaves the stone with a wood-colored hole.
+    cell = 32
+    size = 19
+    circle_r = 0.22  # restated from design.md rather than imported
+    palette = Palette()
+    black_point, white_point, empty_point = Point(4, 16), Point(10, 16), Point(16, 16)
+    pos = Position(
+        size=size,
+        stones={black_point: "black", white_point: "white"},
+        marks={p: Mark("circle", "black") for p in (black_point, white_point, empty_point)},
+    )
+    img = render_png(pos, cell=cell, palette=palette)
+
+    for point, expected, why in (
+        (white_point, palette.white_stone, "a circle on a white stone must not punch a wood hole in it"),
+        (black_point, palette.black_stone, "a circle on a black stone keeps the stone's face"),
+        (empty_point, palette.wood, "on an empty point the background really is wood"),
+    ):
+        x, y = _png_xy(size, cell, point)
+        assert img.get(x, y) == expected, f"{why} (at {point.notation()})"
+        # ...and the ring itself is still drawn around that interior.
+        assert img.get(x + int(circle_r * cell), y) == palette.mark_black, f"ring missing at {point.notation()}"
+
+
 def test_png_labels_are_stamped_in_auto_contrast() -> None:
     cell = 32
     size = 19
@@ -474,21 +617,26 @@ def test_png_labels_are_stamped_in_auto_contrast() -> None:
 
 
 def test_png_label_glyphs_stay_inside_the_ocr_window() -> None:
-    # The stamped label must fit the 0.30c half-width mask extract.py reads, for
-    # one- and two-digit numbers alike.
+    # The stamped label must fit inside the 0.30c half-width mask extract.py reads,
+    # for one- and two-digit numbers alike -- a glyph clipped by that window is an
+    # unrecognizable glyph. Only pixels ON the stone count: beyond the stone the
+    # bright pixels are wood, which the mask never sees.
     cell = 32
     size = 19
     point = Point(10, 10)
     window = int(0.30 * cell)
+    stone_r2 = (STONE_R * cell) ** 2
     for text in ("1", "12"):
         pos = Position(size=size, stones={point: "black"}, labels={point: text})
         img = render_png(pos, cell=cell)
         x, y = _png_xy(size, cell, point)
         outside = [
-            (px, py)
+            (px - x, py - y)
             for py in range(y - cell // 2, y + cell // 2)
             for px in range(x - cell // 2, x + cell // 2)
-            if max(abs(px - x), abs(py - y)) > window and _lum(img.get(px, py)) >= 180
+            if (px - x) ** 2 + (py - y) ** 2 <= stone_r2
+            and max(abs(px - x), abs(py - y)) > window
+            and _lum(img.get(px, py)) >= 180
         ]
         assert outside == [], f"label {text!r} spills outside the OCR window at {outside[:3]}"
 
@@ -517,7 +665,7 @@ def test_png_noise_stays_within_amplitude() -> None:
     pos = Position(size=13)
     clean = render_png(pos, cell=16, noise=0)
     noisy = render_png(pos, cell=16, noise=3, seed=5)
-    deltas = [abs(a - b) for a, b in zip(clean.pixels, noisy.pixels)]
+    deltas = [abs(a - b) for a, b in zip(clean.pixels, noisy.pixels, strict=True)]
     assert max(deltas) <= 3
     assert any(d > 0 for d in deltas)
 

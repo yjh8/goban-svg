@@ -227,9 +227,7 @@ def _svg_mark(mark: Mark, stone: str | None, x: float, y: float, cell: float) ->
 
     filled_square = mark.type == "square" and stone is None
     if stone is None and not filled_square:
-        parts.append(
-            f'<circle cx="{_f(x)}" cy="{_f(y)}" r="{_f(_BACKING_DISC_RATIO * cell)}" fill="{WOOD_COLOR}"/>'
-        )
+        parts.append(f'<circle cx="{_f(x)}" cy="{_f(y)}" r="{_f(_BACKING_DISC_RATIO * cell)}" fill="{WOOD_COLOR}"/>')
 
     if mark.type == "triangle":
         r = _TRIANGLE_RADIUS_RATIO * cell
@@ -329,9 +327,15 @@ def render_svg(pos: Position, *, cell: float = 36.0, coords: bool = False) -> st
             continue
         x, y = geo.point_xy(p)
         stone = pos.stones.get(p)
-        if stone is None:
+        if stone is None and p not in pos.marks:
             # A label on an empty point sits on a wood disc for the same reason a
             # hollow mark does: grid lines must not run through the glyph.
+            #
+            # Only when the point has NO mark, though. Labels are painted after
+            # marks, so an unconditional disc here would paint over the mark drawn
+            # a moment ago and erase it -- and a marked point needs no disc of its
+            # own anyway: _svg_mark already laid one under a hollow mark, and a
+            # filled mark IS the backing.
             out.append(f'<circle cx="{_f(x)}" cy="{_f(y)}" r="{_f(_BACKING_DISC_RATIO * c)}" fill="{WOOD_COLOR}"/>')
         fill = LABEL_ON_BLACK if stone == "black" else LABEL_ON_WHITE
         out.append(_svg_text(x, y, text, _label_font_size(text, c), fill))
@@ -368,7 +372,7 @@ class Palette:
     """
 
     wood: tuple[int, int, int] = (231, 196, 122)
-    line: tuple[int, int, int] = (54, 42, 24)
+    line: tuple[int, int, int] = (67, 54, 31)  # == the SVG's LINE_COLOR #43361f
     frame: tuple[int, int, int] = (30, 30, 34)
     black_stone: tuple[int, int, int] = (25, 25, 25)
     white_stone: tuple[int, int, int] = (240, 240, 240)
@@ -395,12 +399,20 @@ _HIGHLIGHT_DISTANCE_RATIO = 0.17
 diagonal (gotcha G2: the app's black stones are glossy and the highlight sits at
 ~0.15-0.2 cell, well inside the 0.33-cell wedge patch)."""
 
-_WEDGE_LEG_RATIO = 0.58
+_WEDGE_LEG_RATIO = 0.36
 """EXTRACTOR-COUPLED. Legs of the solid corner wedge, along the two cell edges
-from the cell's top-left corner. extract.py confirms a wedge with an inner probe
-at diagonal offset (0.23c, 0.23c) from the stone center; that point is inside the
-wedge only while ``leg > 0.27 + 0.27 = 0.54c``, so a "tidier" 0.5c leg makes every
-wedge invisible to the extractor."""
+from a corner of the stone's cell. The real app's badges measure 0.31c-0.45c
+(2026-08-19, the three committed screenshots); 0.36c sits in that band. The
+extractor accepts a quadrant-pure component reaching >= 0.38c from the stone
+center on one axis, which the corner-hugging triangle satisfies at any leg in
+the band -- do not shrink below ~0.20c or the component drops under the
+extractor's minimum area."""
+
+_PNG_WEDGE_CORNERS: tuple[tuple[int, int], ...] = ((-1, -1), (1, -1), (-1, 1), (1, 1))
+"""The real app puts the badge in whichever cell corner suits it (all three
+screenshots differ). The clean Position model deliberately does not record the
+corner, so the painter picks one deterministically per point -- which also makes
+the round-trip fixtures exercise every quadrant of the extractor."""
 
 _PNG_SQUARE_HALF_RATIO = 0.22
 """EXTRACTOR-COUPLED. Half-width of a solid square marker on an empty point:
@@ -451,14 +463,18 @@ def _fill_disc(img: Image, cx: float, cy: float, r: float, rgb: tuple[int, int, 
         _fill_rect(img, int(math.ceil(cx - half)), y, int(math.floor(cx + half)), y, rgb)
 
 
-def _fill_corner_wedge(img: Image, x0: float, y0: float, leg: float, rgb: tuple[int, int, int]) -> None:
-    """Fill the right triangle with its square corner at (x0, y0), legs running
-    right and down (the app's top-left corner badge)."""
-    for y in range(int(math.ceil(y0)), int(math.floor(y0 + leg)) + 1):
-        remaining = leg - (y - y0)
-        if remaining < 0:
-            continue
-        _fill_rect(img, int(math.ceil(x0)), y, int(math.floor(x0 + remaining)), y, rgb)
+def _fill_corner_wedge(
+    img: Image, x0: float, y0: float, leg: float, rgb: tuple[int, int, int], dirx: int = 1, diry: int = 1
+) -> None:
+    """Fill the right triangle with its square corner at (x0, y0) and legs of
+    the given length running toward (dirx, diry) -- i.e. from a cell corner in
+    toward the stone center, whichever corner it is."""
+    for k in range(int(leg) + 1):
+        remaining = leg - k
+        y = int(round(y0)) + k * diry
+        xa = int(round(x0))
+        xb = int(round(x0 + dirx * remaining))
+        _fill_rect(img, min(xa, xb), y, max(xa, xb), y, rgb)
 
 
 def _stroke_rect(img: Image, cx: float, cy: float, half: float, width: int, rgb: tuple[int, int, int]) -> None:
@@ -578,9 +594,12 @@ def render_png(
 
     This is the fixture generator behind the extractor's round-trip tests, so it
     mimics the app rather than the clean SVG: a dark UI frame around the wood,
-    glossy black stones, triangle marks as solid corner wedges tucked into the
-    top-left of the stone's cell, square marks on empty points as solid squares,
-    and labels stamped with the 5x7 bitmap font from :mod:`goban_svg.digits`.
+    glossy black stones, triangle marks as solid corner wedges tucked into one
+    corner of the stone's cell -- which corner varies per point, deterministically
+    (see :data:`_PNG_WEDGE_CORNERS`), because the app's own choice varies and the
+    fixtures should exercise every quadrant of the extractor -- square marks on
+    empty points as solid squares, and labels stamped with the 5x7 bitmap font
+    from :mod:`goban_svg.digits`.
 
     ``noise`` adds +/-n per-channel deterministic noise (see :func:`_apply_noise`)
     so extractor thresholds get exercised against something less than perfect.
@@ -607,6 +626,16 @@ def render_png(
     _fill_rect(img, geo.frame, geo.frame, geo.side - geo.frame - 1, geo.side - geo.frame - 1, palette.wood)
 
     grid_width = max(1, int(round(_GRID_WIDTH_RATIO * cell)))
+    if grid_width % 2 == 0:
+        # EXTRACTOR-COUPLED. An even-width band cannot be centered on a pixel: it
+        # straddles the intersection (v-1..v), putting the lines half a pixel off
+        # the stones, hoshi and marks, which are all centered on v. extract.py
+        # locates intersections from the lines and then probes geometry drawn
+        # around the stones, so that half pixel becomes a half-pixel error in
+        # every probe -- enough to slide the wedge-exclusion quadrant off the
+        # wedge and let its edge read as a digit. Round to odd and the band is
+        # symmetric about v again.
+        grid_width -= 1
     half_width = grid_width // 2
     for i in range(pos.size):
         v = geo.origin + i * cell
@@ -639,7 +668,8 @@ def render_png(
         color = _resolve_png_color(mark.color, stone, palette)
         if mark.type == "triangle":
             leg = _WEDGE_LEG_RATIO * cell
-            _fill_corner_wedge(img, x - cell / 2.0, y - cell / 2.0, leg, color)
+            sx, sy = _PNG_WEDGE_CORNERS[(p.col * 7 + p.row * 13) % 4]
+            _fill_corner_wedge(img, x + sx * cell / 2.0, y + sy * cell / 2.0, leg, color, dirx=-sx, diry=-sy)
         elif mark.type == "square":
             half = _PNG_SQUARE_HALF_RATIO * cell
             if stone is None:
@@ -657,8 +687,19 @@ def render_png(
                 _stroke_rect(img, x, y, half, stroke, color)
         elif mark.type == "circle":
             r = _PNG_CIRCLE_MARK_RATIO * cell
+            # A ring is painted as a filled disc with the *background* punched back
+            # out of its middle, so the background has to be whatever is actually
+            # under the mark: the stone's own face on a stone, wood only on an
+            # empty point. Punching wood into a white stone would leave it holed.
+            interior: tuple[int, int, int]
+            if stone is None:
+                interior = palette.wood
+            elif stone == "black":
+                interior = palette.black_stone
+            else:
+                interior = palette.white_stone
             _fill_disc(img, x, y, r, color)
-            _fill_disc(img, x, y, r - stroke, palette.black_stone if stone == "black" else palette.wood)
+            _fill_disc(img, x, y, r - stroke, interior)
         elif mark.type == "cross":
             r = _PNG_CROSS_MARK_RATIO * cell
             for dy in range(int(-r), int(r) + 1):

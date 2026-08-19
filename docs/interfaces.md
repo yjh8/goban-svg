@@ -22,41 +22,50 @@ __init__ (re-exports) ←──────────┘
 COLUMN_LETTERS: str  # "ABCDEFGHJKLMNOPQRSTUVWXYZ" with "I" removed — 25 letters, col 1 = "A"
 
 WEDGE_BLUE: str  # "#2b5fe3"  canonical recorded color for the app's blue corner wedge
-WEDGE_RED: str   # "#e03c3c"  canonical recorded color for the red corner wedge
+WEDGE_RED: str  # "#e03c3c"  canonical recorded color for the red corner wedge
 # (shared by extract.py, which records them, and render.py, which draws them)
+
 
 @dataclass(frozen=True)
 class Point:
     col: int  # 1-based, col 1 = "A" = left edge
     row: int  # 1-based, row 1 = bottom edge
+
     @classmethod
-    def parse(cls, text: str, size: int = 19) -> "Point": ...   # "D17"; ValueError w/ clear msg
-    def notation(self) -> str: ...                              # "D17" (skip I)
-    def sgf(self, size: int) -> str: ...                        # "dc"; sgf y from top: sy = size - row
+    def parse(cls, text: str, size: int = 19) -> "Point": ...  # "D17"; ValueError w/ clear msg
+    def notation(self) -> str: ...  # "D17" (skip I)
+    def sgf(self, size: int) -> str: ...  # "dc"; sgf y from top: sy = size - row
+
 
 MARK_TYPES: frozenset[str]  # {"triangle", "square", "circle", "cross"}
 
+
 @dataclass(frozen=True)
 class Mark:
-    type: str                 # ∈ MARK_TYPES
+    type: str  # ∈ MARK_TYPES
     color: str | None = None  # "black" | "white" | "#rrggbb" | None (auto-contrast at render)
+
 
 @dataclass
 class Position:
     size: int = 19
-    stones: dict[Point, str] = field(default_factory=dict)   # value ∈ {"black", "white"}
+    stones: dict[Point, str] = field(default_factory=dict)  # value ∈ {"black", "white"}
     marks: dict[Point, Mark] = field(default_factory=dict)
     labels: dict[Point, str] = field(default_factory=dict)
-    def validate(self) -> None: ...            # ValueError on out-of-bounds / bad colors / bad mark types
-    def to_json_dict(self) -> dict: ...        # the schema in design.md §4
+
+    def validate(self) -> None: ...  # ValueError on out-of-bounds / bad colors / bad mark types
+    def to_json_dict(self) -> dict: ...  # the schema in design.md §4
     @classmethod
     def from_json_dict(cls, d: dict) -> "Position": ...
     def to_json(self, indent: int = 2) -> str: ...
     @classmethod
     def from_json(cls, text: str) -> "Position": ...
 
-def star_points(size: int) -> frozenset[Point]: ...   # hoshi for 9/13/19; empty frozenset otherwise
+
+def star_points(size: int) -> frozenset[Point]: ...  # hoshi for 9/13/19; empty frozenset otherwise
 def ascii_diagram(pos: Position) -> str: ...
+
+
 # rows size→1 top-to-bottom, "X" black / "O" white / "." empty / "+" hoshi;
 # marks/labels listed in a legend below the grid (e.g. "D14: triangle #2b5fe3, label '3'")
 ```
@@ -78,36 +87,53 @@ notation string is fine.
 ## png_codec.py  (imports nothing from this package)
 
 ```python
-class PngError(Exception): ...
+class PngError(Exception): ...          # unsupported feature (interlaced, exotic depth, unknown critical chunk...)
+class PngCorruptError(PngError): ...    # damaged data: CRC mismatch, bad IHDR/PLTE/tRNS, zlib/length errors
+
 
 @dataclass
 class Image:
     width: int
     height: int
-    pixels: bytearray       # len == width * height * 3, RGB8 row-major
+    pixels: bytearray  # len == width * height * 3, RGB8 row-major
+
     @classmethod
     def new(cls, width: int, height: int, fill: tuple[int, int, int] = (0, 0, 0)) -> "Image": ...
     def get(self, x: int, y: int) -> tuple[int, int, int]: ...
     def set(self, x: int, y: int, rgb: tuple[int, int, int]) -> None: ...
     def fill(self, rgb: tuple[int, int, int]) -> None: ...
 
-def read_png(data: bytes) -> Image: ...      # bit depth 8/16, color types 0/2/3/4/6, filters 0–4
-def write_png(img: Image) -> bytes: ...      # RGB8, filter 0, zlib level 6
+
+def read_png(data: bytes) -> Image: ...  # bit depth 8/16, color types 0/2/3/4/6, filters 0–4
+def write_png(img: Image) -> bytes: ...  # RGB8, filter 0, zlib level 6
 def load_image(path: str | Path) -> Image: ...
-# PNG → read_png; on PngError (interlaced/exotic) or non-PNG magic → Pillow fallback if
-# installed, else re-raise PngError with "re-save as plain PNG or install goban-svg[images]" guidance
+
+
+# PNG → read_png; on unsupported-feature PngError or non-PNG magic → Pillow fallback if
+# installed (the no-Pillow error carries the original reason + install guidance).
+# PngCorruptError NEVER falls back: Pillow skips CRC checks and would silently decode
+# corrupt bytes, defeating the integrity guarantee. tRNS transparency and alpha channels
+# composite over opaque black.
 ```
 
 ## digits.py  (imports Image from png_codec)
 
 ```python
 TEMPLATES: dict[str, tuple[str, ...]]  # "0"–"9" → 7 row-strings of 5 chars, "1" = ink (design.md §6)
+ALT_TEMPLATES: dict[str, tuple[tuple[str, ...], ...]]  # per-digit alternate exemplars measured from
+# real app fonts (e.g. the round-top '3'); recognize() scores each digit by its best exemplar,
+# stamp() always paints the classic TEMPLATES face
 
-def stamp(img: Image, text: str, cx: int, cy: int, scale: int = 2,
-          color: tuple[int, int, int] = (0, 0, 0)) -> None: ...
+
+def stamp(img: Image, text: str, cx: int, cy: int, scale: int = 2, color: tuple[int, int, int] = (0, 0, 0)) -> None: ...
+
+
 # paint text centered at (cx, cy); each glyph 5×7 units at `scale` px/unit, 1-unit inter-glyph gap
 
+
 def recognize(cells: Sequence[int], *, max_distance: int = 12, min_margin: int = 2) -> str | None: ...
+
+
 # cells: 35 values (0/1), row-major 5-wide×7-tall coverage grid for ONE glyph.
 # Best Hamming match over TEMPLATES; None if best > max_distance or runner-up within min_margin.
 ```
@@ -116,10 +142,15 @@ def recognize(cells: Sequence[int], *, max_distance: int = 12, min_margin: int =
 
 ```python
 class SgfError(Exception): ...
-def position_to_sgf(pos: Position) -> str: ...     # AB/AW/SZ + TR/SQ/CR/MA/LB (colors dropped — lossy)
+
+
+def position_to_sgf(pos: Position) -> str: ...  # AB/AW/SZ + TR/SQ/CR/MA/LB (colors dropped — lossy)
 def position_from_sgf(text: str) -> Position: ...
-# rejects B[]/W[] move nodes: SgfError("... static positions only ...");
-# supports compressed point lists AB[aa:cd] and escaped ] in LB values
+
+
+# rejects ANY B/W property (moves incl. passes): SgfError("... static positions ...");
+# compressed point lists on AB/AW/AE/TR/SQ/CR/MA; full FF[4] SimpleText escaping in LB;
+# one tree, no variations; sizes 2..25 square only; emits (;FF[4]GM[1]CA[UTF-8]SZ[n]...
 ```
 
 ## render.py  (imports board, png_codec, digits)
@@ -130,15 +161,19 @@ class BoardGeometry:
     size: int
     cell: float
     coords: bool = False
+
     # margin = 0.72*cell beyond outer lines; coord gutters (left + bottom) when coords=True
     @property
     def width(self) -> float: ...
     @property
     def height(self) -> float: ...
     def point_xy(self, p: Point) -> tuple[float, float]: ...
+
     # x grows right from col 1; y grows DOWN from row `size` (row 1 is the bottom line)
 
+
 def render_svg(pos: Position, *, cell: float = 36.0, coords: bool = False) -> str: ...
+
 
 @dataclass(frozen=True)
 class Palette:
@@ -146,12 +181,24 @@ class Palette:
     line: tuple[int, int, int] = (67, 54, 31)
     # + whatever stone/marker colors the painter needs — painter-internal, name freely
 
+
 KGS_PALETTE: Palette  # wood=(220, 179, 92)
 
-def render_png(pos: Position, *, cell: int = 32, palette: Palette | None = None,
-               coords: bool = False, noise: int = 0, seed: int = 1) -> Image: ...
+
+def render_png(
+    pos: Position,
+    *,
+    cell: int = 32,
+    palette: Palette | None = None,
+    coords: bool = False,
+    noise: int = 0,
+    seed: int = 1,
+) -> Image: ...
+
+
 # APP-style painter (fixture generator): triangle marks on stones are painted as SOLID CORNER
-# WEDGES tucked into the top-left corner of the stone's cell in the mark's color; square marks
+# WEDGES tucked into one corner of the stone's cell (chosen deterministically per point, so
+# fixtures exercise every quadrant — the real app varies the corner too) in the mark's color; square marks
 # on empty points are solid filled squares (half-width 0.22*cell); labels are stamped with
 # digits.stamp in auto-contrast color; `noise` = ± per-channel amplitude via a deterministic
 # LCG seeded with `seed` (no randomness).
@@ -160,20 +207,23 @@ def render_png(pos: Position, *, cell: int = 32, palette: Palette | None = None,
 ## extract.py  (imports board, png_codec, digits)
 
 ```python
-class ExtractionError(Exception): ...   # no board found / Nx != Ny (cropped) / unusable input
+class ExtractionError(Exception): ...  # no board found / Nx != Ny (cropped) / unusable input
+
 
 @dataclass
 class GridFit:
-    xs: list[float]           # fitted vertical-line x coords, left→right (len == size)
-    ys: list[float]           # fitted horizontal-line y coords, top→bottom (len == size)
-    spacing: float            # d
-    bbox: tuple[int, int, int, int]   # x0, y0, x1, y1 wood bbox (inclusive)
+    xs: list[float]  # fitted vertical-line x coords, left→right (len == size)
+    ys: list[float]  # fitted horizontal-line y coords, top→bottom (len == size)
+    spacing: float  # d
+    bbox: tuple[int, int, int, int]  # x0, y0, x1, y1 wood bbox (inclusive)
+
 
 @dataclass
 class ExtractionResult:
     position: Position
     grid: GridFit
     warnings: list[str]
+
 
 def extract_position(img: Image) -> ExtractionResult: ...
 ```
@@ -184,7 +234,7 @@ Grid orientation note: `ys[0]` is the TOP image row, which is board row `size`; 
 ## cli.py  (imports everything)
 
 ```python
-def main(argv: list[str] | None = None) -> int: ...   # design.md §8; also wired as __main__
+def main(argv: list[str] | None = None) -> int: ...  # design.md §8; also wired as __main__
 ```
 
 ## __init__.py

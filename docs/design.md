@@ -308,3 +308,60 @@ Start by asking Joseph for the screenshots (§1), then bootstrap (§2), then bui
 in this order: board → png_codec → digits → sgf → render → extract → cli → tests as you
 go. Good luck — the design is solid; the fun part is watching the first real screenshot
 come back as a clean position.
+
+---
+
+## Post-migration amendments (2026-08-19, after the Codex xhigh design review)
+
+The design above is preserved verbatim; the following sections of it are **superseded**,
+per the adversarial design review (1 BLOCKER, 15 MAJOR, 7 MINOR) and measurement against
+the three real screenshots in `examples/`. `docs/build-learnings.md` has the failure modes.
+
+- **§6 wedge detection (BLOCKER)**: fixed diagonal probes + inner rim probe replaced by a
+  per-cell corner-region connected-component test — quadrant purity, minimum area, corner
+  reach ≥ 0.38c, tip within 0.42c of the stone center. Ownership comes from the cell, not
+  an inner probe. Real badges measure 0.31c–0.45c legs, in varying corners.
+- **§6 bbox rule**: per-axis wood counts get a sliding-max support window before
+  thresholding (a 1px grid line zeroes its whole column, truncating the run to one cell);
+  run ends trimmed back to raw-count columns so the dark UI frame can't bleed in.
+- **§6 line-ness**: requires wood on *both* sides perpendicular (either-side lets stone
+  flanks forge peaks).
+- **§6 label OCR**: the wedge-quadrant exclusion is replaced by exact subtraction of the
+  detected wedge's pixels + a residue rule; `digits.py` gained `ALT_TEMPLATES` (the app's
+  round-top '3').
+- **§8 SGF**: emits `(;FF[4]GM[1]CA[UTF-8]SZ[n]`; full SimpleText escaping (`\`, `]`, `:`,
+  soft line breaks); compressed point lists on all seven point-list properties incl. `AE`;
+  rejects any `B`/`W` property, variations, multiple trees, inverted rectangles, and
+  non-square or >25 sizes.
+- **§7 PNG**: alpha now composites over opaque black (was: dropped); per-chunk CRC32
+  verified; decode matrix test covers every claimed (color type × bit depth × filter).
+- **§9 testing**: the synthetic round trip is recognized as circular (F5); the committed
+  real screenshots + verified JSON in `examples/` are the regression fixtures that keep it
+  honest (`tests/test_real_examples.py`).
+- **§4 board model**: sizes clamped to 2–25 (the 25-letter notation limit); JSON loading
+  rejects duplicate/conflicting points with clear errors.
+
+### Code-review round (same day, Codex xhigh + two independent Claude lenses)
+
+The implementation then went through the adversarial code-review gate (0 BLOCKER, 8 MAJOR
+after dedup across three reviewers). All confirmed findings were fixed the same day:
+
+- **extract**: sizes outside 2–25 now raise `ExtractionError` before any `Point` is built
+  (a 26+-line grid previously crashed in `notation()`); a missing wood margin beyond the
+  outer lines (< 0.30c on any side) warns — the only signal that catches a *symmetric*
+  crop, which passes the Nx == Ny check and can land on a standard size.
+- **png_codec**: IHDR/PLTE/tRNS structural validation; decompression bounded (bomb-proof)
+  with exact-length + Adler enforcement; tRNS transparency implemented for color types
+  0/2/3 (composited over black); unknown *critical* chunks and missing IEND rejected;
+  `PngCorruptError` split from `PngError` so corruption never falls back to Pillow (which
+  skips CRCs) while unsupported features still do.
+- **board**: label values must be non-empty control-character-free strings; canonical
+  duplicate label keys and unknown stone buckets rejected.
+- **sgf**: within-one-node AB/AW/AE overlaps rejected (FF[4]: property order is not
+  significant); `position_to_sgf` validates its input; label whitespace normalization
+  documented.
+- **render**: a label's backing disc no longer erases a mark on the same empty point;
+  circle-mark interiors match their occupant (a white stone no longer gets a wood hole).
+- **cli**: `--cell` must be finite, 0 < c ≤ 1000; outputs can never overwrite the input
+  file; `convert` refuses to clobber a hand-edited JSON sidecar without `--force`;
+  position files are read BOM-tolerantly.

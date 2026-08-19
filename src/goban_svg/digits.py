@@ -50,13 +50,28 @@ _GLYPH_ROWS = 7
 _GLYPH_GAP = 1  # inter-glyph gap, in font units, per the interface contract
 
 
+ALT_TEMPLATES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "3": (("01110", "10001", "00010", "00111", "00001", "10001", "01110"),),
+}
+"""Alternate exemplars seen in the wild, keyed by digit. TEMPLATES holds the
+classic flat-top faces from docs/design.md; real apps draw some digits
+differently. The round-top '3' here was measured cell-for-cell from the
+committed examples/board-1.png at D14 (2026-08-19), where the classic template
+landed nearer '0' and '8' (Hamming 6/6 vs 9) and the margin rule -- correctly --
+refused to guess. recognize() scores each digit by its best exemplar; stamp()
+always paints the classic face."""
+
+
 def _flatten(template: tuple[str, ...]) -> list[int]:
     """Row-major 5x7 -> a flat 35-length 0/1 list, matching recognize()'s cells layout."""
     return [1 if ch == "1" else 0 for row in template for ch in row]
 
 
-# Precomputed once: avoids re-flattening all ten templates on every recognize() call.
-_FLAT_TEMPLATES: dict[str, list[int]] = {digit: _flatten(bits) for digit, bits in TEMPLATES.items()}
+# Precomputed once: every exemplar for each digit, classic face first.
+_FLAT_BY_DIGIT: dict[str, list[list[int]]] = {
+    digit: [_flatten(bits)] + [_flatten(alt) for alt in ALT_TEMPLATES.get(digit, ())]
+    for digit, bits in TEMPLATES.items()
+}
 
 
 def stamp(
@@ -129,10 +144,14 @@ def recognize(cells: Sequence[int], *, max_distance: int = 12, min_margin: int =
         raise ValueError(f"recognize(): expected {_GLYPH_COLS * _GLYPH_ROWS} cells, got {len(cells)}")
     bits = [1 if c else 0 for c in cells]
 
-    # Rank all ten templates by Hamming distance; tie-break on digit string so
-    # the result is deterministic regardless of dict iteration order.
+    # Rank the ten digits by their best exemplar's Hamming distance (classic
+    # face or an ALT_TEMPLATES variant); tie-break on digit string so the
+    # result is deterministic regardless of dict iteration order.
     ranked = sorted(
-        ((sum(a != b for a, b in zip(bits, flat, strict=True)), digit) for digit, flat in _FLAT_TEMPLATES.items()),
+        (
+            (min(sum(a != b for a, b in zip(bits, flat, strict=True)) for flat in flats), digit)
+            for digit, flats in _FLAT_BY_DIGIT.items()
+        ),
         key=lambda pair: (pair[0], pair[1]),
     )
     best_distance, best_digit = ranked[0]

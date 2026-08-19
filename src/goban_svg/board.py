@@ -121,6 +121,11 @@ def _is_valid_mark_color(color: str) -> bool:
     return color in ("black", "white") or bool(_HEX_COLOR_RE.match(color))
 
 
+def _control_char(text: str) -> str | None:
+    """First C0 control character in `text` (ord < 0x20), or None if there is none."""
+    return next((ch for ch in text if ord(ch) < 0x20), None)
+
+
 @dataclass
 class Position:
     """A Go board position: stones, marks, and text labels on a `size`x`size` grid.
@@ -136,15 +141,34 @@ class Position:
 
     def validate(self) -> None:
         """Raise ValueError on an invalid size, an out-of-bounds point, a bad
-        stone color, or a bad mark type/color.
+        stone color, a bad mark type/color, or a label that is not renderable
+        text.
+
+        `size` must be between 2 and 25 inclusive: human point notation (see
+        COLUMN_LETTERS) only has 25 column letters, so a bigger board has no
+        valid notation for its rightmost columns, and a 0/1-sized board has no
+        meaningful position to hold.
+
+        A label value must be a NON-EMPTY `str` containing no C0 control
+        character (ord < 0x20). Each half of that is a real failure the model is
+        the only place to stop: a non-str label (`3`, `None`) reaches the SVG
+        renderer's text pass and dies there with a TypeError far from its cause
+        -- or, via JSON, round-trips as a schema violation -- while a control
+        character is simply not expressible in XML 1.0, so a label containing one
+        would emit an SVG file that no parser will read while the tool reports
+        success. Both are rejected here, naming the point.
 
         Out-of-bounds points are reported by raw (col, row) rather than through
         Point.notation(), which can only render points already inside
         COLUMN_LETTERS's 25-letter range -- calling notation() on the very point
-        this check exists to catch could itself raise IndexError.
+        this check exists to catch could itself raise IndexError. Every later
+        check may use notation() freely: the bounds loop has already run.
         """
-        if self.size < 1:
-            raise ValueError(f"invalid board size: {self.size}")
+        if not (2 <= self.size <= 25):
+            raise ValueError(
+                f"invalid board size {self.size}: must be between 2 and 25 "
+                f"(human point notation supports at most {len(COLUMN_LETTERS)} columns, A-Z skipping I)"
+            )
         for point in (*self.stones, *self.marks, *self.labels):
             if not (1 <= point.col <= self.size) or not (1 <= point.row <= self.size):
                 raise ValueError(
@@ -158,6 +182,17 @@ class Position:
                 raise ValueError(f"invalid mark type {mark.type!r} at (col={point.col}, row={point.row})")
             if mark.color is not None and not _is_valid_mark_color(mark.color):
                 raise ValueError(f"invalid mark color {mark.color!r} at (col={point.col}, row={point.row})")
+        for point, text in self.labels.items():
+            if not isinstance(text, str):
+                raise ValueError(f"label at {point.notation()} must be a string, got {type(text).__name__}")
+            if not text:
+                raise ValueError(f"empty label at {point.notation()}: a label must be non-empty text")
+            control = _control_char(text)
+            if control is not None:
+                raise ValueError(
+                    f"label at {point.notation()} contains control character U+{ord(control):04X} "
+                    f"(not expressible in XML): {text!r}"
+                )
 
     def to_json_dict(self) -> dict:
         """Serialize to the schema documented in design.md sec 4 / interfaces.md.
@@ -183,19 +218,114 @@ class Position:
 
     @classmethod
     def from_json_dict(cls, d: dict) -> Position:
-        """Inverse of to_json_dict(). Validates the result, so malformed notation
-        or an out-of-bounds point surfaces as ValueError at load time rather than
-        silently corrupting downstream rendering or extraction.
+        """Inverse of to_json_dict(). Validates the result, so malformed notation,
+        an out-of-bounds point, or an out-of-range size surfaces as ValueError at
+        load time rather than silently corrupting downstream rendering or
+        extraction.
+
+        Conflicting or duplicate source data is rejected *before* it is
+        flattened into the stones/marks/labels dicts -- a later duplicate entry
+        silently overwriting an earlier one in a dict would hide the conflict
+        entirely:
+
+        - the same point listed under both "black" and "white" -> ValueError
+          naming the point and both colors.
+        - the same point repeated within one color's list -> ValueError naming
+          the point and color.
+        - two "marks" entries recorded at the same point -> ValueError naming
+          the point.
+        - two "labels" keys that name the SAME point once parsed ("a1" and
+          "A1") -> ValueError naming the point. Point.parse normalizes case, so
+          textually distinct keys can collide; without this check the second
+          silently wins.
+
+        Structurally wrong types anywhere in `d` (e.g. "stones" not an object,
+        a color's point list not a list, a "marks" entry not an object, a label
+        value not a string, "size" not an int) raise ValueError with a message
+        naming the offending key -- never a bare TypeError/AttributeError/
+        KeyError escaping from deep inside parsing.
+
+        Unknown keys are treated differently at the two levels, deliberately.
+        Unknown TOP-LEVEL keys in `d` are ignored, for forward compatibility
+        with future schema additions. An unknown key inside "stones" is an
+        ERROR: the schema's only buckets are "black" and "white", so anything
+        else ("Black", "empty", a typo) is a bucket of stones that would be
+        silently dropped from the loaded position -- data loss reported as
+        success.
         """
+        if not isinstance(d, dict):
+            raise ValueError(f"position JSON must be an object, got {type(d).__name__}")
+        if "size" not in d:
+            raise ValueError("position JSON is missing required key 'size'")
         size = d["size"]
+        if not isinstance(size, int) or isinstance(size, bool):
+            raise ValueError(f"'size' must be an int, got {type(size).__name__}")
+
+        stones_raw = d.get("stones", {})
+        if not isinstance(stones_raw, dict):
+            raise ValueError(f"'stones' must be an object with 'black'/'white' lists, got {type(stones_raw).__name__}")
+        unknown_buckets = sorted(repr(key) for key in stones_raw if key not in ("black", "white"))
+        if unknown_buckets:
+            raise ValueError(
+                f"unknown key(s) in 'stones': {', '.join(unknown_buckets)} -- "
+                f"the only stone colors are 'black' and 'white' (keys are case-sensitive)"
+            )
         stones: dict[Point, str] = {}
         for color in ("black", "white"):
-            for notation in d.get("stones", {}).get(color, []):
-                stones[Point.parse(notation, size)] = color
+            notations = stones_raw.get(color, [])
+            if not isinstance(notations, list):
+                raise ValueError(f"'stones.{color}' must be a list of point notations, got {type(notations).__name__}")
+            for notation in notations:
+                if not isinstance(notation, str):
+                    raise ValueError(f"'stones.{color}' entries must be strings, got {notation!r}")
+                point = Point.parse(notation, size)
+                if point in stones:
+                    if stones[point] == color:
+                        raise ValueError(f"duplicate stone at {point.notation()} in 'stones.{color}'")
+                    raise ValueError(f"point {point.notation()} is listed as both black and white")
+                stones[point] = color
+
+        marks_raw = d.get("marks", [])
+        if not isinstance(marks_raw, list):
+            raise ValueError(f"'marks' must be a list, got {type(marks_raw).__name__}")
         marks: dict[Point, Mark] = {}
-        for entry in d.get("marks", []):
-            marks[Point.parse(entry["point"], size)] = Mark(type=entry["type"], color=entry.get("color"))
-        labels: dict[Point, str] = {Point.parse(notation, size): text for notation, text in d.get("labels", {}).items()}
+        for entry in marks_raw:
+            if not isinstance(entry, dict):
+                raise ValueError(f"each 'marks' entry must be an object, got {type(entry).__name__}")
+            if "point" not in entry:
+                raise ValueError(f"'marks' entry missing required key 'point': {entry!r}")
+            if "type" not in entry:
+                raise ValueError(f"'marks' entry missing required key 'type': {entry!r}")
+            point_notation = entry["point"]
+            if not isinstance(point_notation, str):
+                raise ValueError(f"'marks' entry 'point' must be a string, got {point_notation!r}")
+            mark_type = entry["type"]
+            if not isinstance(mark_type, str):
+                raise ValueError(f"'marks' entry 'type' must be a string, got {mark_type!r} at {point_notation!r}")
+            mark_color = entry.get("color")
+            if mark_color is not None and not isinstance(mark_color, str):
+                raise ValueError(
+                    f"'marks' entry 'color' must be a string or null, got {mark_color!r} at {point_notation!r}"
+                )
+            point = Point.parse(point_notation, size)
+            if point in marks:
+                raise ValueError(f"two marks recorded at {point.notation()}")
+            marks[point] = Mark(type=mark_type, color=mark_color)
+
+        labels_raw = d.get("labels", {})
+        if not isinstance(labels_raw, dict):
+            raise ValueError(f"'labels' must be an object mapping point -> text, got {type(labels_raw).__name__}")
+        labels: dict[Point, str] = {}
+        for notation, text in labels_raw.items():
+            if not isinstance(notation, str):
+                raise ValueError(f"'labels' keys must be point-notation strings, got {notation!r}")
+            if not isinstance(text, str):
+                raise ValueError(f"'labels' values must be strings, got {text!r} at {notation!r}")
+            point = Point.parse(notation, size)
+            if point in labels:
+                raise ValueError(f"duplicate label at {point.notation()} (two 'labels' keys name the same point)")
+            labels[point] = text
+
         position = cls(size=size, stones=stones, marks=marks, labels=labels)
         position.validate()
         return position
