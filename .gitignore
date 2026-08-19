@@ -11,5 +11,8 @@ __pycache__/
 # --- Generated / transient (never source-of-truth) ---
 /outputs/
 
+# --- Raw input inbox (curated copies land in examples/, tracked) ---
+/screenshots/
+
 # --- macOS ---
 .DS_Store
