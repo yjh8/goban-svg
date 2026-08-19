@@ -16,8 +16,11 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
   addressed. Read `docs/build-learnings.md`, `docs/decisions.md`, and `docs/design.md`
   § "Post-migration amendments" before touching the extractor; the design doc's original
   §6 wedge/bbox text is superseded by D-002.
-- **Next workstream (D-004):** hands-on testing → web app phase 1 (no auth) → Google
-  sign-in only after the app is functional and tested.
+- **2026-08-19 evening — web app phase 1 LIVE at https://goban-svg.pages.dev (D-005):**
+  static Cloudflare Pages + self-hosted Pyodide runs the wheel in-browser; zh-TW 圍棋
+  UI; in-page JSON correction loop; strict CSP. Shared with the 海峰棋院 staff for
+  verification. Phase 2 (D-004): Cloudflare Access + Google IdP after they confirm.
+  Deploy: `scripts/deploy-web.sh --deploy` (sha256-pinned Pyodide, auto smoke check).
 
 ## Conventions (fleet defaults that apply here)
 

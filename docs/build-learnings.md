@@ -3,6 +3,23 @@
 > What actually went wrong (failure modes, not just fixes), so the next session doesn't
 > rediscover them. Newest first.
 
+## Web arc (2026-08-19c): port the workflow, not just the function
+
+Both Codex reviews of the web app converged on one lesson. The design review's
+BLOCKER was that the CLI's defining workflow — edit the JSON, re-render — existed
+as a *download* in the web design but not as an *action*: the function was ported,
+the workflow wasn't. When wrapping a tool in a new surface, walk each documented
+user loop end-to-end in the new surface before calling the design done.
+
+Smaller ones worth keeping: (1) pure-stdlib Python + Pyodide on static Pages is a
+zero-backend architecture where the privacy story ("images never leave the
+browser") becomes CSP-*enforceable* rather than aspirational — a fleet-reusable
+pattern for local-compute tools; (2) `pyodide-core` self-hosts in ~15 MB and boots
+under `script-src 'self' 'wasm-unsafe-eval'` — no 'unsafe-eval' needed (314.0.5);
+(3) the Chrome-extension `file_upload` on a stale element ref can silently reset
+the page — re-`find` refs after any DOM-changing step, and treat "state looks
+freshly booted" as the tell.
+
 ## ruff's format gate covers markdown code blocks (2026-08-19b)
 
 CI went red after shipping because `ruff format --check .` (ruff 0.16) formats
