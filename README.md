@@ -16,7 +16,8 @@ Status: genesis 2026-08-19. Initial implementation is being migrated in from a p
 | `src/goban_svg/` | tracked | The package: board model, PNG codec, digit OCR, SGF, renderers, extractor, CLI |
 | `tests/` | tracked | pytest suite — synthetic-fixture round-trip tests, no external fixtures |
 | `docs/` | tracked | Canonical docs: `design.md` (locked design handoff), `interfaces.md` (module contract), `build-learnings.md` |
-| `screenshots/` | **gitignored** | Raw input inbox for Joseph's board screenshots (curated copies go to `examples/`) |
+| `examples/` | tracked | The three source screenshots + their converted `.json`/`.svg`/`.sgf` outputs (the gallery) |
+| `screenshots/` | **gitignored** | Raw input inbox for board screenshots (curated copies go to `examples/`) |
 | `.github/workflows/` | tracked | CI: ruff check + format + pytest on Python 3.10/3.13 |
 
 > Rule: any new top-level file or directory gets a row here **in the same commit** (fleet taxonomy standard).
