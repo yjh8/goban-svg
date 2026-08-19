@@ -87,8 +87,10 @@ notation string is fine.
 ## png_codec.py  (imports nothing from this package)
 
 ```python
-class PngError(Exception): ...          # unsupported feature (interlaced, exotic depth, unknown critical chunk...)
-class PngCorruptError(PngError): ...    # damaged data: CRC mismatch, bad IHDR/PLTE/tRNS, zlib/length errors
+class PngError(Exception): ...  # unsupported feature (interlaced, exotic depth, unknown critical chunk...)
+
+
+class PngCorruptError(PngError): ...  # damaged data: CRC mismatch, bad IHDR/PLTE/tRNS, zlib/length errors
 
 
 @dataclass
