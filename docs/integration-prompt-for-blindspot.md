@@ -1,94 +1,83 @@
-# 棋盤辨識整合包 — Build prompt for the 序盤盲區庫 AI
+# 棋盤辨識整合包 v2 — Build spec for the 序盤盲區庫 AI (Sonnet)
 
-> 給 AI 開發助手的完整建置提示。目標：在既有的 Next.js 應用（序盤盲區庫，Vercel）中
-> 加入「棋盤圖片 → 盤面資料 + 棋譜圖」功能。辨識引擎已經完成、經過測試、可直接下載 —
-> **你的工作是嵌入它，不是重寫它。**
->
-> (Prompt for an AI coding assistant. Goal: add "board image → position data + clean
-> diagram" to the existing Next.js app. The recognition engine is finished, tested, and
-> downloadable — your job is to EMBED it, not rebuild it.)
+You are integrating a **finished, tested Go-board-recognition engine** into the existing
+序盤盲區庫 Next.js app. This document is a complete specification: every file you need is
+included in full, every decision is already made. **Follow it literally. Where this spec
+and your instincts disagree, the spec wins.**
 
----
+## §0 — Hard rules (read first)
 
-## 1. What you are integrating
+**MUST NOT:**
+1. Do NOT re-implement, port, or modify any recognition logic. The engine ships as a
+   Python wheel with 427 tests behind it; every threshold was calibrated on real
+   screenshots. You call it; you never edit it.
+2. Do NOT change any string given in §7 (warning/error regexes) or §3–§5 (code files)
+   except where a line is explicitly marked `// ADAPT:`.
+3. Do NOT skip `coords=True` in the SVG render call. Do NOT hide or drop `warnings`.
+4. Do NOT rename any JSON schema key (`size`, `stones`, `black`, `white`, `marks`,
+   `point`, `type`, `color`, `labels`).
+5. Do NOT fetch the wheel at build time or vendor it into the repo — it is loaded at
+   runtime by URL (CORS is enabled on the host).
+6. Do NOT return or display raw Python tracebacks to users.
 
-A working converter that turns a Go-app screenshot into:
+**MUST:**
+1. Ship the correction loop (§5's editor + 「套用修正並重新產生」). A JSON download alone
+   is NOT a correction feature.
+2. Show every warning under 「請人工確認」, translated per §7.
+3. Pass the acceptance checklist in §9 before reporting done.
 
-- **Structured position JSON** (every stone, move-number labels 手數, marker badges 記號)
-- **A clean SVG diagram** with coordinate labels (棋譜圖，含座標)
-- **SGF export** (static position)
+## §1 — Fixed facts (copy exactly)
 
-Live reference implementation — open it, use it, view its source; your integration must
-match its behavior: **https://goban-svg.pages.dev** (zh-TW UI, runs entirely client-side).
+| Item | Value |
+|---|---|
+| Engine wheel URL (runtime, CORS-enabled) | `https://goban-svg.pages.dev/wheels/goban_svg-0.1.0-py3-none-any.whl` |
+| Wheel SHA-256 | `5964bad5d9f5c0a5c0b8bf47d55a359953d3249e23dbe0d82ea3cb7942c7c836` |
+| Expected `goban_svg.__version__` | `0.1.0` |
+| Pyodide version (pinned) | `314.0.5` |
+| Pyodide module URL | `https://cdn.jsdelivr.net/pyodide/v314.0.5/full/pyodide.mjs` |
+| Pyodide indexURL | `https://cdn.jsdelivr.net/pyodide/v314.0.5/full/` |
+| Live reference implementation | `https://goban-svg.pages.dev` (your integration must match its outputs exactly) |
 
-The engine is a **pure-Python, zero-dependency wheel** (works on any Python ≥ 3.10 and
-under Pyodide in the browser):
+If the app has a Content-Security-Policy, it must allow:
+`script-src: https://cdn.jsdelivr.net 'wasm-unsafe-eval'` and
+`connect-src: https://cdn.jsdelivr.net https://goban-svg.pages.dev`.
+If there is no CSP (default for a plain Next.js app), nothing to do.
+
+## §2 — Deliverables (exact file manifest)
+
+Create exactly these files in the Next.js repo (App Router assumed; adapt paths only if
+the repo uses the Pages Router):
 
 ```
-URL:    https://goban-svg.pages.dev/wheels/goban_svg-0.1.0-py3-none-any.whl
-SHA256: 5964bad5d9f5c0a5c0b8bf47d55a359953d3249e23dbe0d82ea3cb7942c7c836
-Size:   65,760 bytes (pure Python — the .py source is inside; read it if unsure)
+public/goban/worker.js            ← §3, verbatim
+components/GobanConverter.tsx     ← §4, verbatim except lines marked ADAPT
+components/goban-converter.css    ← §5, adapt design tokens to the app's palette
+app/blindspot/new/…               ← mount <GobanConverter onConfirm={...}/> wherever a
+                                    new 錯題/盤面 is entered (ADAPT to the app's flow)
 ```
 
-It is backed by 427 tests including pixel-exact regression fixtures on real app
-screenshots. **Do not re-implement, port, or "tune" any of it** — every threshold in the
-extractor was calibrated against real images; a rewrite will be wrong in invisible ways.
+The component calls `onConfirm(position)` with the final JSON (after any user
+corrections) — wire that into the app's existing save flow for a problem entry.
 
-## 2. The Python API surface (everything you need)
-
-```python
-from goban_svg.png_codec import Image, load_image, PngError
-from goban_svg.extract import extract_position, ExtractionError
-from goban_svg.render import render_svg
-from goban_svg.sgf import position_to_sgf, SgfError
-from goban_svg.board import Position
-
-# Input path 1 — raw pixels you decoded yourself (browser/canvas route):
-img = Image(width=w, height=h, pixels=bytearray(rgb))   # packed RGB8, len == w*h*3
-
-# Input path 2 — a PNG file/bytes (server route):
-img = load_image("board.png")                            # own PNG codec; JPEG needs Pillow installed
-
-result = extract_position(img)      # raises ExtractionError on non-boards (fail-loud)
-pos = result.position               # size, stones, marks, labels
-warnings = result.warnings          # list[str] — MUST be shown to the user (see §6)
-
-svg_text  = render_svg(pos, coords=True)   # coords=True is required for verification UX
-json_text = pos.to_json()                  # the human-editable interchange format
-sgf_text  = position_to_sgf(pos)           # lossy: mark colors are not preserved
-
-# The correction loop (required feature, see §7):
-pos2 = Position.from_json(edited_json_text)   # raises ValueError with a clear message
-```
-
-JSON schema (`pos.to_json()` emits exactly this shape; columns skip `I`, rows count from
-the bottom; sizes 2–25 supported):
-
-```json
-{
-  "size": 19,
-  "stones": {"black": ["C8", "..."], "white": ["D14", "..."]},
-  "marks": [
-    {"point": "D2",  "type": "square",   "color": "black"},
-    {"point": "D14", "type": "triangle", "color": "#2b5fe3"}
-  ],
-  "labels": {"D14": "3"}
-}
-```
-
-## 3. Choose ONE integration route
-
-### Route A — client-side in the browser via Pyodide (recommended; this is what the reference site does)
-
-No backend at all; images never leave the user's browser; free at any scale.
-Load Pyodide (pin a version; ≥ 0.26 works, the reference uses 314.0.5) in a **module Web
-Worker**, install the wheel by URL, run the driver below. First load ≈ 5–8 s (cached
-afterwards); a 950 px board converts in ≈ 2–6 s.
-
-Worker driver (this is the reference site's actual bridge, condensed — reuse it):
+## §3 — `public/goban/worker.js` (complete, verbatim)
 
 ```js
-// worker.js  (module worker)
+/* Module Web Worker hosting the goban_svg recognition engine via Pyodide.
+ * Protocol:
+ *  in : {type:"boot"}
+ *  in : {type:"convert",  id, width, height, buf}  // buf: transferred ArrayBuffer, packed RGB8
+ *  in : {type:"rerender", id, json}                // json: edited Position JSON text
+ *  out: {type:"boot-progress", stage}              // stage: "runtime" | "package"
+ *  out: {type:"ready", appVersion}
+ *  out: {type:"boot-error", message}
+ *  out: {type:"result", id, payload}               // payload: see DRIVER _ok/_err below
+ *  out: {type:"error", id, message}
+ */
+
+const PYODIDE_INDEX = "https://cdn.jsdelivr.net/pyodide/v314.0.5/full/";
+const WHEEL_URL = "https://goban-svg.pages.dev/wheels/goban_svg-0.1.0-py3-none-any.whl";
+const EXPECTED_VERSION = "0.1.0";
+
 const DRIVER = `
 import json as _json
 from goban_svg.board import Position
@@ -99,150 +88,639 @@ from goban_svg.sgf import position_to_sgf
 
 def _ok(pos, warnings):
     black = sum(1 for c in pos.stones.values() if c == "black")
-    return _json.dumps({"ok": True, "svg": render_svg(pos, coords=True),
-        "json": pos.to_json(), "sgf": position_to_sgf(pos), "size": pos.size,
-        "black": black, "white": len(pos.stones) - black,
-        "marks": len(pos.marks), "labels": len(pos.labels), "warnings": list(warnings)})
+    return _json.dumps({
+        "ok": True,
+        "svg": render_svg(pos, coords=True),
+        "json": pos.to_json(),
+        "sgf": position_to_sgf(pos),
+        "size": pos.size,
+        "black": black,
+        "white": len(pos.stones) - black,
+        "marks": len(pos.marks),
+        "labels": len(pos.labels),
+        "warnings": list(warnings),
+    })
+
+def _err(kind, exc):
+    return _json.dumps({"ok": False, "kind": kind, "message": str(exc)})
 
 def convert_rgb(js_buf, width, height):
     try:
         pixels = bytearray(width * height * 3)
-        js_buf.assign_to(pixels)                      # single-copy JS->Python bridge
-        result = extract_position(Image(width=width, height=height, pixels=pixels))
+        js_buf.assign_to(pixels)
+        img = Image(width=width, height=height, pixels=pixels)
+        result = extract_position(img)
         return _ok(result.position, result.warnings)
     except ExtractionError as exc:
-        return _json.dumps({"ok": False, "kind": "extract", "message": str(exc)})
+        return _err("extract", exc)
     except Exception as exc:
-        return _json.dumps({"ok": False, "kind": "internal", "message": str(exc)})
+        return _err("internal", exc)
 
 def rerender(text):
     try:
-        return _ok(Position.from_json(text), [])
+        pos = Position.from_json(text)
+        return _ok(pos, [])
     except ValueError as exc:
-        return _json.dumps({"ok": False, "kind": "invalid", "message": str(exc)})
+        return _err("invalid", exc)
+    except Exception as exc:
+        return _err("internal", exc)
 `;
 
-let py;
+let bootPromise = null;
+
 async function boot() {
-  const { loadPyodide } = await import("<your-pyodide>/pyodide.mjs");
-  py = await loadPyodide({ indexURL: "<your-pyodide>/" });
-  await py.loadPackage("https://goban-svg.pages.dev/wheels/goban_svg-0.1.0-py3-none-any.whl");
+  postMessage({ type: "boot-progress", stage: "runtime" });
+  const { loadPyodide } = await import(PYODIDE_INDEX + "pyodide.mjs");
+  const py = await loadPyodide({ indexURL: PYODIDE_INDEX });
+  postMessage({ type: "boot-progress", stage: "package" });
+  await py.loadPackage(WHEEL_URL);
   py.runPython(DRIVER);
+  const version = py.runPython("import goban_svg; goban_svg.__version__");
+  if (version !== EXPECTED_VERSION) {
+    throw new Error(`wheel version ${version} != expected ${EXPECTED_VERSION}`);
+  }
+  return py;
 }
-self.onmessage = async ({ data: m }) => {
-  if (m.type === "boot") { await boot(); postMessage({ type: "ready" }); return; }
-  try {
-    let raw;
-    if (m.type === "convert") {
-      py.globals.set("_RGB", new Uint8Array(m.buf));
-      try { raw = py.runPython(`convert_rgb(_RGB, ${m.width|0}, ${m.height|0})`); }
-      finally { py.runPython("del _RGB"); }
-    } else {  // rerender
-      py.globals.set("_TXT", m.json);
-      try { raw = py.runPython("rerender(_TXT)"); } finally { py.runPython("del _TXT"); }
+
+function ensureBoot() {
+  if (!bootPromise) bootPromise = boot();
+  return bootPromise;
+}
+
+self.onmessage = async (event) => {
+  const msg = event.data;
+  if (msg.type === "boot") {
+    try {
+      await ensureBoot();
+      postMessage({ type: "ready", appVersion: EXPECTED_VERSION });
+    } catch (err) {
+      bootPromise = null; // allow a retry
+      postMessage({ type: "boot-error", message: String(err) });
     }
-    postMessage({ type: "result", id: m.id, payload: JSON.parse(raw) });
-  } catch (err) { postMessage({ type: "error", id: m.id, message: String(err) }); }
+    return;
+  }
+  if (msg.type === "convert" || msg.type === "rerender") {
+    try {
+      const py = await ensureBoot();
+      let raw;
+      if (msg.type === "convert") {
+        py.globals.set("_RGB_JS", new Uint8Array(msg.buf));
+        try {
+          raw = py.runPython(`convert_rgb(_RGB_JS, ${msg.width | 0}, ${msg.height | 0})`);
+        } finally {
+          py.runPython("del _RGB_JS");
+        }
+      } else {
+        py.globals.set("_JSON_TEXT", msg.json);
+        try {
+          raw = py.runPython("rerender(_JSON_TEXT)");
+        } finally {
+          py.runPython("del _JSON_TEXT");
+        }
+      }
+      postMessage({ type: "result", id: msg.id, payload: JSON.parse(raw) });
+    } catch (err) {
+      postMessage({ type: "error", id: msg.id, message: String(err) });
+    }
+  }
 };
 ```
 
-Browser-side pixel contract (main thread — every step is load-bearing; the extractor
-was calibrated for exactly this normalization):
+## §4 — `components/GobanConverter.tsx` (complete; only ADAPT-marked lines may change)
 
-```js
-const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" }); // EXIF!
-const long = Math.max(bitmap.width, bitmap.height);
-if (long < 300) throw new Error("too small");
-const s = Math.min(1, 1400 / long);                    // downscale cap: memory + speed
-const w = Math.max(1, Math.round(bitmap.width * s)), h = Math.max(1, Math.round(bitmap.height * s));
-const canvas = new OffscreenCanvas(w, h), ctx = canvas.getContext("2d");
-ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);       // composite alpha over BLACK
-ctx.drawImage(bitmap, 0, 0, w, h); bitmap.close();
-const rgba = ctx.getImageData(0, 0, w, h).data;         // sRGB
-const rgb = new Uint8Array(w * h * 3);
-for (let i = 0, j = 0; j < rgb.length; i += 4, j += 3) {
-  rgb[j] = rgba[i]; rgb[j+1] = rgba[i+1]; rgb[j+2] = rgba[i+2];
+```tsx
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import "./goban-converter.css";
+
+/* ------------------------------------------------------------------ types */
+
+type Payload = {
+  ok: boolean;
+  kind?: "extract" | "invalid" | "internal";
+  message?: string;
+  svg?: string;
+  json?: string;
+  sgf?: string;
+  size?: number;
+  black?: number;
+  white?: number;
+  marks?: number;
+  labels?: number;
+  warnings?: string[];
+};
+
+type Props = {
+  /** Called with the confirmed Position JSON (post-correction). ADAPT: wire to app save flow. */
+  onConfirm?: (positionJson: string, svg: string, sgf: string) => void;
+};
+
+/* ------------------------------------------------------- fixed constants */
+
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_LONG_EDGE = 1400; // keeps a 19x19 grid at >= ~60px spacing; do not raise
+const MIN_LONG_EDGE = 300;
+const MAX_JSON_CHARS = 2_000_000;
+const MAX_WORKER_ATTEMPTS = 3;
+
+/* zh-TW warning translations — regexes match the engine's EXACT strings (§7).
+   Do not "improve" the regexes; they are pinned to the engine's wording. */
+const WARNING_MAP: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+  [/unreadable label on the (?:black|white) stone at (\S+)/,
+    (m) => `${m[1]} 上的手數無法辨識，請對照原圖人工確認。`],
+  [/ambiguous stone color at (\S+).*read as (black|white)/,
+    (m) => `${m[1]} 的棋子顏色不明確（已判讀為${m[2] === "black" ? "黑棋" : "白棋"}），請確認。`],
+  [/unusual board size (\d+)x\d+/,
+    (m) => `非標準棋盤大小 ${m[1]}×${m[1]}（標準為 9、13、19），請確認截圖完整。`],
+  [/almost no wood margin|cropped mid-board/,
+    () => "棋盤外緣留白不足，截圖可能被裁切 — 請確認棋盤大小與座標是否正確。"],
+  [/grid spacing differs/,
+    () => "圖片可能被不等比例縮放，辨識品質可能受影響。"],
+];
+
+/* Order matters: specific before generic (the size-cap error also mentions "grid"). */
+const ERROR_MAP: Array<[RegExp, string]> = [
+  [/sizes 2-25/i, "辨識出的棋盤大小超出支援範圍（2–25 路）。"],
+  [/no board found|contains no wood|spans too few/i,
+    "無法在圖片中找到棋盤。請使用清晰、正對拍攝的棋盤圖片（App 截圖效果最佳）。"],
+  [/looks like a cropped screenshot|lines wide but/i,
+    "棋盤似乎被裁切，兩個方向的線數不一致 — 請重新截取完整棋盤。"],
+  [/grid fit|candidate lines|collapsed|lines survived|spacing/i,
+    "無法辨識棋盤格線。實體棋盤照片請盡量正對拍攝、避免陰影。"],
+];
+
+function zhWarning(raw: string): string {
+  for (const [re, fmt] of WARNING_MAP) {
+    const m = raw.match(re);
+    if (m) return fmt(m);
+  }
+  return "發現一項需要確認的狀況（原文見「技術訊息」）。";
 }
-worker.postMessage({ type: "convert", id, width: w, height: h, buf: rgb.buffer }, [rgb.buffer]);
+
+function zhExtractError(raw: string): string {
+  for (const [re, zh] of ERROR_MAP) if (re.test(raw)) return zh;
+  return "棋盤辨識失敗，請換一張更清晰的圖片試試。";
+}
+
+/* ------------------------------------------------------------ component */
+
+export default function GobanConverter({ onConfirm }: Props) {
+  const workerRef = useRef<Worker | null>(null);
+  const attemptsRef = useRef(0);
+  const jobRef = useRef(0);
+  const pendingRef = useRef<{ buf: ArrayBuffer; width: number; height: number } | null>(null);
+  const blobUrlsRef = useRef<string[]>([]);
+  const previewUrlRef = useRef<string | null>(null);
+
+  const [engineReady, setEngineReady] = useState(false);
+  const [status, setStatus] = useState("載入辨識引擎中…（首次開啟約需數秒）");
+  const [fileLabel, setFileLabel] = useState("拖曳圖片到這裡，或點擊選擇檔案");
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [canConvert, setCanConvert] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ main: string; detail: string } | null>(null);
+  const [result, setResult] = useState<Payload | null>(null);
+  const [downloads, setDownloads] = useState<{ svg: string; json: string; sgf: string } | null>(null);
+  const [editorText, setEditorText] = useState("");
+
+  const refreshCanConvert = useCallback((ready: boolean, isBusy: boolean) => {
+    setCanConvert(ready && !!pendingRef.current && !isBusy);
+  }, []);
+
+  /* ------------------------------------------------------------- worker */
+
+  const startWorker = useCallback(function start() {
+    attemptsRef.current += 1;
+    const w = new Worker("/goban/worker.js", { type: "module" });
+    workerRef.current = w;
+
+    const fail = (detail: string) => {
+      setEngineReady(false);
+      setBusy(false);
+      w.terminate();
+      workerRef.current = null;
+      if (attemptsRef.current < MAX_WORKER_ATTEMPTS) {
+        setStatus("辨識引擎載入異常，正在重試…");
+        start();
+      } else {
+        setStatus("");
+        setError({ main: "辨識引擎載入失敗，請重新整理頁面再試一次。", detail });
+      }
+    };
+
+    w.onerror = (e) => fail(e.message || "worker error");
+    w.onmessageerror = () => fail("worker message deserialization failed");
+    w.onmessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (msg.type === "boot-progress") {
+        setStatus(msg.stage === "package" ? "載入棋盤辨識程式中…" : "載入辨識引擎中…（首次開啟約需數秒）");
+        return;
+      }
+      if (msg.type === "ready") {
+        attemptsRef.current = 0;
+        setEngineReady(true);
+        setStatus("辨識引擎已就緒。");
+        refreshCanConvert(true, false);
+        return;
+      }
+      if (msg.type === "boot-error") { fail(msg.message); return; }
+      if (msg.id !== jobRef.current) return; // stale result — superseded
+      setBusy(false);
+      refreshCanConvert(true, false);
+      if (msg.type === "error") {
+        setError({ main: "處理過程發生預期外的錯誤，請重試或換一張圖片。", detail: msg.message });
+        setStatus("");
+        return;
+      }
+      handlePayload(msg.payload as Payload);
+    };
+    w.postMessage({ type: "boot" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    startWorker();
+    return () => {
+      workerRef.current?.terminate();
+      blobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* -------------------------------------------------------- file intake */
+
+  async function acceptFile(file: File) {
+    setError(null);
+    setResult(null);
+    pendingRef.current = null;
+    jobRef.current += 1; // invalidate any in-flight job for the previous image
+    refreshCanConvert(engineReady, false);
+
+    if (file.size > MAX_FILE_BYTES) {
+      setError({ main: "圖片檔案太大（上限 25 MB），請縮小後再試。", detail: `${file.name}: ${file.size} bytes` });
+      return;
+    }
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: "from-image" }); // EXIF-aware
+    } catch (err) {
+      const heic = /\.hei[cf]$/i.test(file.name) || /hei[cf]/i.test(file.type);
+      setError({
+        main: heic
+          ? "此瀏覽器無法讀取 HEIC 格式，請改用 Safari，或先將照片轉成 JPEG。"
+          : "無法讀取這個圖片檔，請確認格式（建議 PNG 或 JPEG）。",
+        detail: String(err),
+      });
+      return;
+    }
+    const long = Math.max(bitmap.width, bitmap.height);
+    if (long < MIN_LONG_EDGE) {
+      setError({ main: "圖片解析度太低，無法辨識棋盤（長邊至少 300 像素）。", detail: `${bitmap.width}×${bitmap.height}` });
+      bitmap.close();
+      return;
+    }
+    const s = Math.min(1, MAX_LONG_EDGE / long);
+    const w = Math.max(1, Math.round(bitmap.width * s));
+    const h = Math.max(1, Math.round(bitmap.height * s));
+    let rgba: Uint8ClampedArray;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+      ctx.fillStyle = "#000";           // composite alpha over BLACK — matches the engine's policy
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      rgba = ctx.getImageData(0, 0, w, h).data; // sRGB
+    } catch (err) {
+      setError({ main: "圖片處理失敗，可能是尺寸或格式問題，請換一張圖片。", detail: String(err) });
+      return;
+    } finally {
+      bitmap.close();
+    }
+    const rgb = new Uint8Array(w * h * 3);
+    for (let i = 0, j = 0; j < rgb.length; i += 4, j += 3) {
+      rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+    }
+    pendingRef.current = { buf: rgb.buffer, width: w, height: h };
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = URL.createObjectURL(file);
+    setPreviewSrc(previewUrlRef.current);
+    setFileLabel(`已選擇：${file.name}（辨識尺寸 ${w}×${h}）— 點擊可更換`);
+    setStatus(engineReady ? "可以轉換了。" : "圖片已就緒，等待辨識引擎載入…");
+    refreshCanConvert(engineReady, false);
+  }
+
+  /* ----------------------------------------------------------- convert */
+
+  function convert() {
+    const pending = pendingRef.current;
+    if (!pending || busy || !engineReady) return;
+    setError(null);
+    jobRef.current += 1;
+    setBusy(true);
+    setCanConvert(false);
+    setStatus("辨識棋盤中…（依裝置效能約需數秒）");
+    const copy = pending.buf.slice(0); // keep the original so the user can convert again
+    workerRef.current!.postMessage(
+      { type: "convert", id: jobRef.current, width: pending.width, height: pending.height, buf: copy },
+      [copy],
+    );
+  }
+
+  function rerender() {
+    if (busy || !engineReady) return;
+    if (editorText.length > MAX_JSON_CHARS) {
+      setError({ main: "JSON 內容過大（上限約 2 MB），請檢查是否貼錯內容。", detail: `${editorText.length} chars` });
+      return;
+    }
+    setError(null);
+    jobRef.current += 1;
+    setBusy(true);
+    setStatus("套用修正、重新產生棋譜圖中…");
+    workerRef.current!.postMessage({ type: "rerender", id: jobRef.current, json: editorText });
+  }
+
+  function handlePayload(p: Payload) {
+    if (!p.ok) {
+      if (p.kind === "extract") setError({ main: zhExtractError(p.message ?? ""), detail: p.message ?? "" });
+      else if (p.kind === "invalid") setError({ main: "JSON 內容有誤，尚未套用 — 請檢查格式與座標。", detail: p.message ?? "" });
+      else setError({ main: "辨識程式發生內部錯誤，請回報這個問題。", detail: p.message ?? "" });
+      setStatus("");
+      return;
+    }
+    blobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    const mk = (text: string, mime: string) => {
+      const url = URL.createObjectURL(new Blob([text], { type: mime }));
+      blobUrlsRef.current.push(url);
+      return url;
+    };
+    blobUrlsRef.current = [];
+    setDownloads({
+      svg: mk(p.svg!, "image/svg+xml"),
+      json: mk(p.json!, "application/json"),
+      sgf: mk(p.sgf!, "application/x-go-sgf"),
+    });
+    setEditorText(p.json!);
+    setResult(p);
+    setStatus("轉換完成。請對照原圖確認盤面。");
+  }
+
+  /* ---------------------------------------------------------------- UI */
+
+  const summary = result?.ok
+    ? [`${result.size}×${result.size} 棋盤：黑 ${result.black} 子、白 ${result.white} 子`,
+       result.marks ? `記號 ${result.marks} 個` : "",
+       result.labels ? `手數標記 ${result.labels} 個` : ""].filter(Boolean).join("、")
+    : "";
+
+  return (
+    <div className="gsvg">
+      <label className="gsvg-dropzone">
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => e.target.files?.[0] && acceptFile(e.target.files[0])}
+        />
+        <span>{fileLabel}</span>
+        {previewSrc && <img src={previewSrc} alt="已選擇的棋盤圖片預覽" />}
+      </label>
+
+      <button className="gsvg-convert" disabled={!canConvert} onClick={convert}>
+        轉換成棋譜圖
+      </button>
+      <p className="gsvg-status" role="status" aria-live="polite">{status}</p>
+
+      {error && (
+        <div className="gsvg-error" role="alert">
+          <p>{error.main}</p>
+          <details><summary>技術詳情</summary><pre>{error.detail}</pre></details>
+        </div>
+      )}
+
+      {result?.ok && (
+        <section className="gsvg-result">
+          <p className="gsvg-summary">{summary}</p>
+
+          {result.warnings && result.warnings.length > 0 && (
+            <div className="gsvg-warnings">
+              <h4>請人工確認</h4>
+              <ul>{result.warnings.map((raw, i) => <li key={i}>{zhWarning(raw)}</li>)}</ul>
+              <details><summary>技術訊息（原文）</summary><pre>{result.warnings.join("\n")}</pre></details>
+            </div>
+          )}
+
+          <div className="gsvg-compare">
+            <figure>
+              {previewSrc && <img src={previewSrc} alt="原始棋盤圖片" />}
+              <figcaption>原圖</figcaption>
+            </figure>
+            <figure>
+              {/* SVG is generated by the engine from validated data; labels are XML-escaped inside it. */}
+              <div dangerouslySetInnerHTML={{ __html: result.svg! }} />
+              <figcaption>棋譜圖（含座標，供對照確認）</figcaption>
+            </figure>
+          </div>
+
+          {downloads && (
+            <div className="gsvg-downloads">
+              <a href={downloads.svg} download="goban-board.svg">下載 SVG 棋譜圖</a>
+              <a href={downloads.json} download="goban-board.json">下載 JSON（可修正）</a>
+              <a href={downloads.sgf} download="goban-board.sgf">下載 SGF 棋譜（靜態盤面，記號顏色不保留）</a>
+            </div>
+          )}
+
+          <details className="gsvg-editor">
+            <summary>修正辨識結果（編輯 JSON 後重新產生）</summary>
+            <p>棋子座標格式如 <code>"D14"</code>（直行 A–T 略過 I，橫列由下往上數）。</p>
+            <textarea
+              rows={12}
+              spellCheck={false}
+              value={editorText}
+              disabled={busy}
+              onChange={(e) => setEditorText(e.target.value)}
+              aria-label="盤面 JSON 編輯器"
+            />
+            <div>
+              <button disabled={busy} onClick={rerender}>套用修正並重新產生</button>
+            </div>
+          </details>
+
+          {onConfirm && (
+            <button
+              className="gsvg-confirm"
+              disabled={busy}
+              onClick={() => onConfirm(result.json!, result.svg!, result.sgf!)}
+            >
+              確認盤面，加入錯題庫 {/* ADAPT: wording to match the app's flow */}
+            </button>
+          )}
+
+          <p className="gsvg-privacy">圖片僅在您的瀏覽器中處理，不會上傳到任何伺服器。</p>
+        </section>
+      )}
+    </div>
+  );
+}
 ```
 
-Route-A hardening (all shipped on the reference site — replicate): run conversion in a
-persistent worker with job IDs (discard stale results); invalidate in-flight jobs when a
-new image is selected; disable the JSON editor while a job runs; recreate a crashed
-worker (bounded retries); revoke old preview/download Blob URLs; cap JSON input ~2 MB.
+## §5 — `components/goban-converter.css` (adapt tokens to the app's dark palette)
 
-### Route B — server-side on Vercel (simpler wiring, images leave the browser)
+```css
+/* ADAPT: swap the custom-property values to the app's design tokens. Keep structure. */
+.gsvg { --gsvg-panel: #16181f; --gsvg-line: #2c3040; --gsvg-ink: #e8e6df;
+        --gsvg-accent: #4048e8; --gsvg-warn: #d8b74a; --gsvg-danger: #e06050;
+        color: var(--gsvg-ink); display: flex; flex-direction: column; gap: .8rem; }
+.gsvg-dropzone { display: flex; flex-direction: column; align-items: center; gap: .6rem;
+  min-height: 8rem; justify-content: center; padding: 1rem; cursor: pointer;
+  background: var(--gsvg-panel); border: 2px dashed var(--gsvg-line); border-radius: 10px; }
+.gsvg-dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.gsvg-dropzone img { max-width: 100%; max-height: 16rem; border-radius: 6px; }
+.gsvg-convert, .gsvg-editor button, .gsvg-confirm { min-height: 44px; padding: .55rem 1.1rem;
+  border-radius: 10px; border: none; background: var(--gsvg-accent); color: #fff;
+  font-size: 1rem; cursor: pointer; }
+.gsvg-convert:disabled, .gsvg-editor button:disabled { opacity: .45; cursor: not-allowed; }
+.gsvg-status { min-height: 1.4em; opacity: .75; }
+.gsvg-error { border: 1px solid var(--gsvg-danger); border-radius: 10px; padding: .7rem 1rem; }
+.gsvg-error > p { color: var(--gsvg-danger); font-weight: 600; margin: 0 0 .3rem; }
+.gsvg-warnings { border: 1px solid var(--gsvg-warn); border-radius: 10px; padding: .6rem 1rem; }
+.gsvg-compare { display: flex; gap: 1rem; flex-wrap: wrap; }
+.gsvg-compare figure { flex: 1 1 20rem; min-width: 0; margin: 0; }
+.gsvg-compare img, .gsvg-compare svg { width: 100%; height: auto; background: #fff; border-radius: 6px; }
+.gsvg-downloads { display: flex; gap: .6rem; flex-wrap: wrap; }
+.gsvg-downloads a { background: var(--gsvg-panel); border: 1px solid var(--gsvg-line);
+  color: var(--gsvg-ink); padding: .5rem .9rem; border-radius: 10px; text-decoration: none;
+  min-height: 44px; display: inline-flex; align-items: center; }
+.gsvg-editor textarea { width: 100%; font-family: ui-monospace, Menlo, monospace;
+  font-size: .8rem; background: var(--gsvg-panel); color: var(--gsvg-ink);
+  border: 1px solid var(--gsvg-line); border-radius: 6px; padding: .5rem; }
+.gsvg-editor summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.gsvg-privacy { opacity: .6; font-size: .85rem; }
+pre { overflow-x: auto; }
+```
 
-A Python serverless function: `pip install <wheel-url>` plus `pillow` (for JPEG uploads),
-then `load_image` → `extract_position` → return `{svg, json, sgf, warnings}`. Native
-extraction takes well under a second. Mind Vercel body-size limits (~4.5 MB — downscale
-client-side first anyway) and never return raw tracebacks: catch `ExtractionError` /
-`PngError` / `ValueError` and map them per §6.
+## §6 — Fallback route (ONLY if the client-side route is impossible)
 
-## 4. UI requirements (zh-TW, 圍棋 terminology — ready-made copy)
+Use only if the app cannot run Web Workers/WASM (e.g., a hard CSP that cannot change).
+Vercel Python function — `api/convert.py`:
 
-Use these strings verbatim (they were written for this audience):
+```python
+# requirements.txt:
+#   https://goban-svg.pages.dev/wheels/goban_svg-0.1.0-py3-none-any.whl
+#   pillow
+from http.server import BaseHTTPRequestHandler
+import json
 
-- 上傳區：「拖曳圖片到這裡，或點擊選擇檔案」／「App 截圖效果最佳，實體棋盤照片為實驗性支援」
-- 按鈕：「轉換成棋譜圖」；進行中：「辨識棋盤中…」；首次載入（Route A）：「載入辨識引擎中…」
-- 結果摘要：「{size}×{size} 棋盤：黑 {black} 子、白 {white} 子、記號 {marks} 個、手數標記 {labels} 個」
-- 下載：「下載 SVG 棋譜圖」「下載 JSON（可修正）」「下載 SGF 棋譜（靜態盤面，記號顏色不保留）」
-- 修正區：「修正辨識結果（編輯 JSON 後重新產生）」／按鈕「套用修正並重新產生」
-- Route A 隱私句（只有全前端才可以寫）：「圖片僅在您的瀏覽器中處理，不會上傳到任何伺服器」
+from goban_svg.extract import ExtractionError, extract_position
+from goban_svg.png_codec import Image, PngError, read_png
+from goban_svg.render import render_svg
+from goban_svg.sgf import position_to_sgf
 
-Layout: show the **original image and the diagram side by side** (stacked with a
-原圖/棋譜圖 toggle on mobile). The SVG must render with coordinates (`coords=True`) so a
-reviewer can locate points named in warnings.
 
-## 5. What it can and cannot do (set user expectations honestly)
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        try:
+            try:
+                img = read_png(body)                      # PNG fast path
+            except PngError:
+                from io import BytesIO
+                from PIL import Image as PILImage          # JPEG/WebP via Pillow
+                pil = PILImage.open(BytesIO(body)).convert("RGB")
+                img = Image(width=pil.width, height=pil.height, pixels=bytearray(pil.tobytes()))
+            result = extract_position(img)
+            pos = result.position
+            black = sum(1 for c in pos.stones.values() if c == "black")
+            out = {"ok": True, "svg": render_svg(pos, coords=True), "json": pos.to_json(),
+                   "sgf": position_to_sgf(pos), "size": pos.size, "black": black,
+                   "white": len(pos.stones) - black, "marks": len(pos.marks),
+                   "labels": len(pos.labels), "warnings": list(result.warnings)}
+        except ExtractionError as exc:
+            out = {"ok": False, "kind": "extract", "message": str(exc)}
+        except Exception as exc:
+            out = {"ok": False, "kind": "internal", "message": str(exc)}
+        data = json.dumps(out).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(data)
+```
 
-- Excellent on **app screenshots**: full boards, 9/13/19 standard (2–25 accepted with a
-  warning), stones on edges, long walls, numbered move labels (multi-digit OK), the app's
-  colored corner wedge badges (recorded as triangle marks with the badge color), solid
-  square markers on empty points.
-- **Photos of physical boards**: experimental. Perspective/shadows usually make it fail —
-  and it fails LOUD (`ExtractionError`), never with a silently wrong board.
-- It reads static positions; it does not replay games or resolve captures.
+Client still performs §4's downscale before uploading (Vercel body limit ≈ 4.5 MB), and
+still uses the same WARNING_MAP/ERROR_MAP and correction loop. The payload shape is
+identical, so §4's component works with a fetch() in place of the worker.
 
-## 6. Warnings and errors — show them, translated
+## §7 — Exact engine strings (authoritative; regexes in §4 are derived from these)
 
-The engine never guesses silently: uncertain readings surface as English warning strings
-naming the exact point. **Always display them** under a 「請人工確認」 heading. Ready
-zh-TW mappings (regex → template):
+Warnings (`result.warnings` entries; `{PT}` is a point like `D14`):
 
-| English pattern | zh-TW |
+```
+unreadable label on the {black|white} stone at {PT} -- check it by hand
+ambiguous stone color at {PT} (disc luminance {N}); read as {black|white}
+unusual board size {N}x{N} (expected one of 9, 13, 19)
+grid spacing differs between axes ({X}px wide vs {Y}px tall) -- the screenshot looks non-uniformly resized; stone classification may suffer
+almost no wood margin beyond the outer grid line ({sides}) -- the screenshot may be cropped mid-board; verify the board really is {N}x{N} before trusting coordinates
+```
+
+`ExtractionError` messages (str(exc); the ones users will actually hit):
+
+```
+no board found: the image contains no wood-colored pixels
+no board found: the wood region spans too few pixels along {x|y}
+no board grid found along {x|y}: only {N} candidate lines
+no board grid found along {x|y}: fewer than 2 lines survived the fit
+grid fit failed: all detected lines collapsed onto one position
+the grid is {N} lines wide but {M} lines tall -- this looks like a cropped screenshot; re-capture the whole board
+fitted a {N}x{N} grid, but positions support sizes 2-25 (the point notation has 25 column letters) -- ...
+```
+
+`Position.from_json` raises `ValueError` with messages that name the offending key/point
+(e.g. `label at D14 must be a non-empty string`). Show them behind the zh-TW lead
+「JSON 內容有誤，尚未套用 — 請檢查格式與座標。」.
+
+## §8 — Capability boundary (tell users the truth)
+
+- **App screenshots: excellent.** Full boards; 9/13/19 standard (2–25 accepted with a
+  warning); stones on edges; long walls; multi-digit move numbers; colored corner wedge
+  badges → triangle marks carrying the badge color (`#2b5fe3` blue, `#e03c3c` red,
+  `white`, `black`); solid square markers on empty points.
+- **Photos of physical boards: experimental.** Perspective/shadows usually raise
+  `ExtractionError` — loud failure, never a silently wrong board. Do not promise photo
+  support in UI copy; the provided strings already say 「實驗性支援」.
+- Static positions only — no game replay, no capture resolution.
+
+## §9 — Acceptance checklist (run ALL before reporting done)
+
+1. **Parity**: convert the same screenshot in your integration AND at
+   https://goban-svg.pages.dev. The four counts (黑/白/記號/手數) MUST match exactly.
+   If they differ, your pixel pipeline deviates from §4 — fix yours, not the engine.
+2. **Correction loop**: change one label in the JSON editor (e.g. `"3"` → `"99"`),
+   apply — the diagram updates and shows `99` on that stone.
+3. **Invalid JSON**: type `{"size": 19, "stones": {"Black": []}}` — a zh-TW validation
+   error appears (unknown stone bucket), nothing crashes.
+4. **Non-board image**: upload any photo without a board — the friendly zh-TW error
+   appears; DevTools console shows no uncaught errors.
+5. **Stale-job race**: select image A, click convert, immediately select image B —
+   A's result must NOT appear beside B's preview.
+6. **Mobile**: the two figures stack; buttons are ≥ 44px tall; everything remains usable.
+7. **Version assert**: temporarily change `EXPECTED_VERSION` to `9.9.9` — boot must fail
+   with the version-mismatch error (then change it back).
+
+## §10 — Troubleshooting
+
+| Symptom | Cause / fix |
 |---|---|
-| `unreadable label on the (black\|white) stone at {PT}` | 「{PT} 上的手數無法辨識，請對照原圖人工確認。」 |
-| `ambiguous stone color at {PT} ... read as (black\|white)` | 「{PT} 的棋子顏色不明確（已判讀為黑棋/白棋），請確認。」 |
-| `unusual board size {N}x{N}` | 「非標準棋盤大小 {N}×{N}（標準為 9、13、19），請確認截圖完整。」 |
-| `almost no wood margin ... cropped mid-board` | 「棋盤外緣留白不足，截圖可能被裁切 — 請確認棋盤大小與座標。」 |
-| `grid spacing differs between axes` | 「圖片可能被不等比例縮放，辨識品質可能受影響。」 |
-| *(unmatched)* | 「發現一項需要確認的狀況（原文見技術訊息）。」+ 原文放在收合區 |
+| Worker never sends `ready` | CDN blocked or CSP missing `cdn.jsdelivr.net` + `'wasm-unsafe-eval'` (§1) |
+| `loadPackage` fails on the wheel | Network/CORS — the wheel host sends `Access-Control-Allow-Origin: *`; check DevTools Network tab for the real status |
+| Counts differ from the reference site | Your canvas pipeline skipped a step: EXIF option, black fill, downscale cap, or RGBA→RGB packing (§4 `acceptFile`) |
+| Rotated phone photos come out sideways | `createImageBitmap` missing `{ imageOrientation: "from-image" }` |
+| Diagram has no coordinates | You dropped `coords=True` in the worker DRIVER — restore it |
+| Intermittent wrong-image results | Job-ID gating removed — restore `jobRef` checks |
 
-`ExtractionError` messages likewise: map `sizes 2-25` → 超出支援範圍；`no board found` →
-「無法在圖片中找到棋盤…」；`cropped screenshot` → 「棋盤似乎被裁切…」；grid-fit failures →
-「無法辨識棋盤格線…」。Show the raw English in a collapsible 「技術詳情」.
+## §11 — Provenance
 
-## 7. The correction loop is REQUIRED, not optional
-
-The defining workflow: recognition will occasionally misread a move number or stone —
-the user fixes it in seconds by editing the JSON and re-rendering (`Position.from_json`
-→ `render_svg`). Ship an editable JSON view (or import) with a 「套用修正並重新產生」
-action. A download-only JSON is not a correction feature. Validation errors from
-`from_json` are precise and name the offending point — surface them.
-
-## 8. Acceptance checklist (verify before calling it done)
-
-1. Convert the same screenshot on your integration AND on https://goban-svg.pages.dev —
-   the summary counts (黑/白/記號/手數) must match exactly.
-2. Edit a label in the JSON, re-render, and see the diagram change.
-3. Upload a non-board image → the friendly zh-TW error appears (no traceback, no crash).
-4. Warnings from a slightly-degraded screenshot appear in zh-TW with the point names.
-5. (Route A) DevTools console stays free of errors during all of the above.
-
-## 9. Provenance
-
-Built and tested by Joseph Huang's toolchain, 2026-08-19–20; provided for use in
-序盤盲區庫. The wheel embeds its full Python source. Questions or wrong-conversion
-reports (please include the original image) go back to Joseph — verified cases become
-permanent regression tests in the engine.
+Engine built and tested by Joseph Huang's toolchain (2026-08-19/20); provided for
+序盤盲區庫. The wheel embeds its full Python source. Report wrong conversions to Joseph
+**with the original image** — verified cases become permanent regression tests in the
+engine, which is how it gets better for everyone.

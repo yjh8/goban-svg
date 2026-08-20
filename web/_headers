@@ -7,3 +7,7 @@
 
 /wheels/*
   Content-Type: application/octet-stream
+  Access-Control-Allow-Origin: *
+
+/pyodide/*
+  Access-Control-Allow-Origin: *
