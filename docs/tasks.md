@@ -16,8 +16,13 @@
    confirms phase 1 works (D-004 sequencing).
 2. Warning i18n hardening — stable warning codes from the extractor instead of the
    zh-TW regex map in app.js (drift risk, design amendment 11).
-3. Real-board photo support — decide after seeing staff photo examples (perspective
-   rectification is a new extraction stage; currently fails loud with zh-TW guidance).
+3. **Photo mode, phase 2 (BLOCKED on real photos)** — phase 1 shipped 2026-08-20
+   (engine `photo.py` + `goban-svg photo` CLI, assisted 4-corner + homography +
+   adaptive classifier; design + amendments in docs/photo-mode-design.md). Phase 2 =
+   calibrate the UNCALIBRATED thresholds on real staff photos (ask Joseph: varied
+   lighting/angles/woods, empty + dense boards, corner stones), commit verified ones
+   as `examples/photo-*` fixtures (D-003), THEN build the corner-picker web UI and
+   release. Do not ship the UI on synthetic-only calibration (design review B3).
 4. (Deferred, small) Codex re-verification round for a clean `APPROVE-0` receipt on
    the v0.1.0 CLI diff — round 1 + fixes are stamped; the re-run was stopped mid-flight.
 

@@ -624,7 +624,14 @@ def load_image(path: str | Path) -> Image:
             "PNG, or install goban-svg[images]."
         ) from (unsupported if unsupported is not None else exc)
 
+    from PIL import ImageOps as _PILImageOps
+
     with _PILImage.open(p) as pil_img:
-        rgb = pil_img.convert("RGB")
+        # Apply the EXIF orientation tag first: phone JPEGs are stored rotated
+        # with a display hint, and photo-mode corner coordinates are given in
+        # DISPLAY orientation -- without this, corners address a differently
+        # rotated raster (photo verification round M3).
+        upright = _PILImageOps.exif_transpose(pil_img) or pil_img
+        rgb = upright.convert("RGB")
         width, height = rgb.size
         return Image(width=width, height=height, pixels=bytearray(rgb.tobytes()))

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from goban_svg.board import Mark, Point, Position, ascii_diagram
 from goban_svg.extract import extract_position
+from goban_svg.photo import extract_photo_position
 from goban_svg.png_codec import load_image
 from goban_svg.render import render_png, render_svg
 
@@ -29,6 +30,7 @@ __all__ = [
     "Point",
     "Position",
     "ascii_diagram",
+    "extract_photo_position",
     "extract_position",
     "load_image",
     "render_png",

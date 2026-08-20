@@ -1,13 +1,17 @@
-"""Command-line entry point: `goban-svg convert / extract / render` (design.md sec 8).
+"""Command-line entry point: `goban-svg convert / extract / photo / render`.
 
 This is the top of the dependency DAG (docs/interfaces.md) -- it imports every
-other module and wires them into three subcommands:
+other module and wires them into four subcommands:
 
 - ``convert IMAGE`` -- the common case, extract + render in one step. Reads a
   screenshot, writes the clean SVG plus a JSON sidecar (the human-editable
   intermediate, design.md sec 2/4), and prints a one-line summary.
 - ``extract IMAGE`` -- screenshot to JSON only (and optionally SGF), for when a
   caller wants to inspect or hand-edit the position before rendering.
+- ``photo IMAGE --corners ... --size N`` -- EXPERIMENTAL assisted extraction for
+  photos of physical boards (docs/photo-mode-design.md): user-supplied corner
+  intersections + declared size, stones only, uncalibrated until the real-photo
+  corpus exists.
 - ``render POS.json|POS.sgf`` -- JSON or SGF back to SVG, the other half of the
   designed correction loop: extract, notice the OCR got a label wrong, edit the
   JSON by hand, re-render.
@@ -39,6 +43,7 @@ from pathlib import Path
 
 from goban_svg.board import Position, ascii_diagram
 from goban_svg.extract import ExtractionError, extract_position
+from goban_svg.photo import extract_photo_position
 from goban_svg.png_codec import PngError, load_image, write_png
 from goban_svg.render import render_png, render_svg
 from goban_svg.sgf import SgfError, position_from_sgf, position_to_sgf
@@ -72,9 +77,20 @@ def _check_no_input_collision(input_path: Path, output_paths: list[Path | None])
     request) are skipped.
     """
     resolved_input = input_path.resolve()
+    seen: dict[Path, Path] = {}
     for out_path in output_paths:
-        if out_path is not None and out_path.resolve() == resolved_input:
+        if out_path is None:
+            continue
+        resolved = out_path.resolve()
+        if resolved == resolved_input:
             raise ValueError(f"output {out_path} would overwrite the input file")
+        # Outputs must also be distinct from EACH OTHER: `-o same --json same`
+        # would silently overwrite the SVG with JSON (photo code review M6).
+        if resolved in seen:
+            raise ValueError(
+                f"output paths {seen[resolved]} and {out_path} are the same file -- outputs must be distinct"
+            )
+        seen[resolved] = out_path
 
 
 def _check_sidecar_writable(json_path: Path, new_text: str, *, force: bool) -> None:
@@ -236,9 +252,64 @@ def _cell_type(value: str) -> float:
     return cell
 
 
+def _corner_type(value: str) -> tuple[float, float]:
+    """Parse one 'X,Y' corner; argparse-friendly errors for anything else."""
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(f"corner {value!r} must be 'X,Y' (e.g. 132.5,88)")
+    try:
+        x, y = float(parts[0]), float(parts[1])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"corner {value!r} has non-numeric coordinates") from exc
+    if not (math.isfinite(x) and math.isfinite(y)) or x < 0 or y < 0:
+        raise argparse.ArgumentTypeError(f"corner {value!r} must be finite, non-negative pixel coordinates")
+    return (x, y)
+
+
+def _cmd_photo(args: argparse.Namespace) -> int:
+    image_path = Path(args.image)
+    print(
+        "notice: photo mode is EXPERIMENTAL (uncalibrated against real photos) -- verify the result by hand",
+        file=sys.stderr,
+    )
+    result = extract_photo_position(load_image(image_path), args.corners, args.size)
+    _emit_warnings(result.warnings)
+    position = result.position
+
+    svg_path: Path = args.output or _default_output(image_path, ".svg")
+    json_path: Path = args.json_path or _default_output(image_path, ".json")
+
+    _check_no_input_collision(image_path, [svg_path, json_path, args.sgf, args.preview])
+
+    new_json_text = position.to_json()
+    _check_sidecar_writable(json_path, new_json_text, force=args.force)
+
+    svg_kwargs: dict[str, object] = {"coords": args.coords}
+    if args.cell is not None:
+        svg_kwargs["cell"] = args.cell
+    svg_path.write_text(render_svg(position, **svg_kwargs), encoding="utf-8")
+    json_path.write_text(new_json_text, encoding="utf-8")
+
+    if args.sgf is not None:
+        args.sgf.write_text(position_to_sgf(position), encoding="utf-8")
+    if args.preview is not None:
+        _write_preview(position, args.preview, coords=args.coords, cell=args.cell)
+    if args.ascii:
+        print(ascii_diagram(position))
+
+    print(_summary_line(position, svg_path))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="goban-svg", description="Convert screenshots of Go board positions into clean SVG diagrams."
+        prog="goban-svg",
+        description=(
+            "Convert images of Go board positions into clean SVG diagrams: automatic "
+            "extraction for app screenshots (convert/extract), assisted extraction for "
+            "photos of physical boards (photo, experimental), and re-rendering of saved "
+            "positions (render)."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -276,6 +347,50 @@ def _build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--sgf", metavar="PATH", type=Path, help="also write an SGF export to this path")
     extract.add_argument("--ascii", action="store_true", help="print an ASCII diagram of the extracted position")
     extract.set_defaults(func=_cmd_extract)
+
+    photo = subparsers.add_parser(
+        "photo",
+        help="EXPERIMENTAL: extract a position from a photo of a physical board (assisted; stones only).",
+        description=(
+            "Assisted extraction for photos of real boards: you supply the four corner "
+            "INTERSECTIONS of the grid (not the wooden edge) in TL TR BR BL order, plus the "
+            "board size. Stones only -- photos carry no move numbers or marks. EXPERIMENTAL: "
+            "the classifier is not yet calibrated on real photos; always verify the output. "
+            "JPEG/WebP inputs require the optional Pillow extra (goban-svg[images]); HEIC is "
+            "not supported -- convert it to JPEG first."
+        ),
+    )
+    photo.add_argument("image", metavar="IMAGE", help="input photo")
+    photo.add_argument(
+        "--corners",
+        metavar="X,Y",
+        type=_corner_type,
+        nargs=4,
+        required=True,
+        help="the four outer grid-line intersections, in TL TR BR BL order (source-image pixels)",
+    )
+    photo.add_argument("--size", type=int, default=19, help="board size, 2-25 (default: 19)")
+    photo.add_argument(
+        "-o", "--output", metavar="OUT.svg", type=Path, help="output SVG path (default: IMAGE with .svg extension)"
+    )
+    photo.add_argument(
+        "--json",
+        dest="json_path",
+        metavar="PATH",
+        type=Path,
+        help="JSON sidecar path (default: IMAGE with .json extension)",
+    )
+    photo.add_argument("--sgf", metavar="PATH", type=Path, help="also write an SGF export to this path")
+    photo.add_argument("--coords", action="store_true", help="draw coordinate letters/numbers")
+    photo.add_argument("--cell", metavar="N", type=_cell_type, help="grid cell size in output units (0 < N <= 1000)")
+    photo.add_argument("--ascii", action="store_true", help="print an ASCII diagram of the extracted position")
+    photo.add_argument("--preview", metavar="OUT.png", type=Path, help="also write an app-style PNG preview")
+    photo.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite a JSON sidecar even if its existing content has hand-edits this run would discard",
+    )
+    photo.set_defaults(func=_cmd_photo)
 
     render = subparsers.add_parser("render", help="Render a saved Position (JSON or SGF) as SVG.")
     render.add_argument("position", metavar="POS.json|POS.sgf", help="input position file (JSON or SGF, sniffed)")

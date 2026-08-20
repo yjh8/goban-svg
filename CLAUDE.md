@@ -34,6 +34,19 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
 
 > Keep today only; older entries roll to `session_logs/`.
 
+### 2026-08-20 — photo mode phase 1 (engine + CLI, EXPERIMENTAL) + repo public + integration kit
+
+**Repo went PUBLIC** (Joseph's call — staff AI needed a GitHub link); creds scan clean.
+**Integration kit** for the 序盤盲區庫 team's Sonnet: docs/integration-prompt-for-blindspot.md
+(v2, prescriptive) + v1 EN/zh-TW kept as teaching examples; CORS enabled on /wheels/* +
+/pyodide/*. **Photo mode phase 1** (staff feedback "handle real photos"): `photo.py`
+(assisted 4-corner homography + adaptive local-wood classifier, all thresholds tagged
+UNCALIBRATED) + `goban-svg photo` CLI + 32 tests (459 total). Design review APPROVE-13
++ code review 2 rounds (2 BLOCKERs found+fixed: edge-clamp fabrication → validity mask;
+axis-norm resolution gate → min singular value) — receipts stamped, all in
+docs/photo-mode-design.md. **Phase 2 (corner-picker UI) BLOCKED on real staff photos**
+(the calibration corpus; D-003). Deployed site unchanged today except CORS headers.
+
 ### 2026-08-19 — v0.1.0 genesis → shipped (Claude Code/Fable 5, joseph-macmini)
 
 **Commits:** b894722 (bootstrap) · 12eb6bf (screenshots + accidental early code) ·

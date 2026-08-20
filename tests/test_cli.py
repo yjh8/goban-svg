@@ -12,6 +12,7 @@ accuracy (that belongs to test_extract.py).
 
 from __future__ import annotations
 
+import json
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -505,3 +506,69 @@ def test_render_bom_prefixed_json_input_renders_successfully(tmp_path) -> None:
     assert default_svg.exists()
     root = _root(default_svg.read_text(encoding="utf-8"))
     assert root.tag == f"{SVG_NS}svg"
+
+
+# --------------------------------------------------------------------------- #
+# photo subcommand (photo code review M9)
+# --------------------------------------------------------------------------- #
+
+
+def _photo_fixture(tmp_path):
+    """A flat painted 9x9 board saved as a 'photo', with its outer-intersection
+    corners (axis-aligned is a valid quad; keeps CLI tests fast)."""
+    from goban_svg.board import Point, Position
+    from goban_svg.png_codec import write_png
+    from goban_svg.render import render_png
+
+    pos = Position(size=9, stones={Point(3, 3): "black", Point(7, 7): "white"})
+    cell = 24
+    img = render_png(pos, cell=cell)
+    margin = int(round(0.72 * cell))
+    frame = max(1, int(round(1.0 * cell)))
+    lo = frame + margin
+    hi = lo + 8 * cell
+    path = tmp_path / "shot.png"
+    path.write_bytes(write_png(img))
+    corners = [f"{lo},{lo}", f"{hi},{lo}", f"{hi},{hi}", f"{lo},{hi}"]
+    return path, corners, pos
+
+
+def test_photo_happy_path_emits_notice_and_outputs(tmp_path, capsys):
+    path, corners, pos = _photo_fixture(tmp_path)
+    out_svg = tmp_path / "shot.svg"
+    rc = main(["photo", str(path), "--corners", *corners, "--size", "9"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "notice:" in captured.err and "EXPERIMENTAL" in captured.err
+    assert out_svg.exists()
+    sidecar = json.loads((tmp_path / "shot.json").read_text(encoding="utf-8"))
+    assert sidecar["stones"]["black"] == ["C3"]
+    assert sidecar["stones"]["white"] == ["G7"]
+
+
+def test_photo_bad_corner_syntax_exits_2(tmp_path, capsys):
+    path, corners, _ = _photo_fixture(tmp_path)
+    rc = main(["photo", str(path), "--corners", "1;2", corners[1], corners[2], corners[3], "--size", "9"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "X,Y" in captured.err
+
+
+def test_photo_output_aliasing_rejected(tmp_path, capsys):
+    path, corners, _ = _photo_fixture(tmp_path)
+    same = tmp_path / "same.out"
+    rc = main(["photo", str(path), "--corners", *corners, "--size", "9", "-o", str(same), "--json", str(same)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "must be distinct" in captured.err
+
+
+def test_photo_sidecar_protection_and_force(tmp_path, capsys):
+    path, corners, _ = _photo_fixture(tmp_path)
+    assert main(["photo", str(path), "--corners", *corners, "--size", "9"]) == 0
+    sidecar = tmp_path / "shot.json"
+    sidecar.write_text(sidecar.read_text(encoding="utf-8").replace("C3", "D4"), encoding="utf-8")
+    rc = main(["photo", str(path), "--corners", *corners, "--size", "9"])
+    captured = capsys.readouterr()
+    assert rc == 1 and "preserved" in captured.err
+    assert main(["photo", str(path), "--corners", *corners, "--size", "9", "--force"]) == 0

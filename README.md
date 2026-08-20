@@ -27,6 +27,9 @@ goban-svg convert board.png --sgf board.sgf --ascii --preview preview.png
 goban-svg extract board.png -o board.json    # screenshot → JSON only
 goban-svg render  board.json -o board.svg    # JSON (or .sgf) → SVG; the correction loop
 goban-svg render  board.json --coords --cell 40
+goban-svg photo   photo.jpg --corners 132,88 940,95 910,760 155,742 --size 19
+                  # EXPERIMENTAL: photos of physical boards — you mark the four corner
+                  # intersections (TL TR BR BL); stones only; verify the result by hand
 ```
 
 `convert` prints a one-line summary (`19×19, 20 black, 20 white, 2 marks, 3 labels → board.svg`)
