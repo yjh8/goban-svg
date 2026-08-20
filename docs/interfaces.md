@@ -249,12 +249,18 @@ Re-exports: `__version__`, `Point`, `Mark`, `Position`, `render_svg`, `render_pn
 ```python
 Corner = tuple[float, float]  # (x, y) in source-photo pixels
 
+
 def validate_corners(corners: Sequence[Corner]) -> tuple[Corner, Corner, Corner, Corner]: ...
+
+
 # contract: TL, TR, BR, BL in the photo's screen orientation; ValueError on crossed/
 # concave/mirrored/degenerate quads — NO reordering is attempted
 
+
 def rectify_board(img: Image, corners: Sequence[Corner], size: int, cell: int = 24) -> Image: ...
 def extract_photo_position(img: Image, corners: Sequence[Corner], size: int) -> ExtractionResult: ...
+
+
 # stones only (photos carry no labels/marks); GridFit coordinates live in the RECTIFIED
 # canonical plane (see the generalized GridFit note); every threshold is UNCALIBRATED
 # until the real-photo corpus exists (docs/photo-mode-design.md amendments, gate B3)

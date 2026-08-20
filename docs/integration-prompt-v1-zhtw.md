@@ -46,21 +46,21 @@ from goban_svg.sgf import position_to_sgf, SgfError
 from goban_svg.board import Position
 
 # 輸入路徑 1 — 自己解碼好的像素（瀏覽器 canvas 路線）：
-img = Image(width=w, height=h, pixels=bytearray(rgb))   # packed RGB8, len == w*h*3
+img = Image(width=w, height=h, pixels=bytearray(rgb))  # packed RGB8, len == w*h*3
 
 # 輸入路徑 2 — PNG 檔案／bytes（伺服器路線）：
-img = load_image("board.png")            # 內建 PNG 解碼器；JPEG 需另裝 Pillow
+img = load_image("board.png")  # 內建 PNG 解碼器；JPEG 需另裝 Pillow
 
-result = extract_position(img)   # 非棋盤圖 → 拋出 ExtractionError（大聲失敗）
-pos = result.position            # size、stones、marks、labels
-warnings = result.warnings       # list[str] — 一定要顯示給使用者（見 §6）
+result = extract_position(img)  # 非棋盤圖 → 拋出 ExtractionError（大聲失敗）
+pos = result.position  # size、stones、marks、labels
+warnings = result.warnings  # list[str] — 一定要顯示給使用者（見 §6）
 
-svg_text  = render_svg(pos, coords=True)   # coords=True 是驗證體驗的必要條件
-json_text = pos.to_json()                  # 可人工編輯的交換格式
-sgf_text  = position_to_sgf(pos)           # 有損：記號顏色不保留
+svg_text = render_svg(pos, coords=True)  # coords=True 是驗證體驗的必要條件
+json_text = pos.to_json()  # 可人工編輯的交換格式
+sgf_text = position_to_sgf(pos)  # 有損：記號顏色不保留
 
 # 修正迴圈（必要功能，見 §7）：
-pos2 = Position.from_json(edited_json_text)   # 錯誤時拋 ValueError，訊息會指名座標
+pos2 = Position.from_json(edited_json_text)  # 錯誤時拋 ValueError，訊息會指名座標
 ```
 
 JSON 結構（`pos.to_json()` 輸出的正是這個形狀；直行字母跳過 `I`，

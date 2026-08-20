@@ -623,19 +623,28 @@ class handler(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         try:
             try:
-                img = read_png(body)                      # PNG fast path
+                img = read_png(body)  # PNG fast path
             except PngError:
                 from io import BytesIO
-                from PIL import Image as PILImage          # JPEG/WebP via Pillow
+                from PIL import Image as PILImage  # JPEG/WebP via Pillow
+
                 pil = PILImage.open(BytesIO(body)).convert("RGB")
                 img = Image(width=pil.width, height=pil.height, pixels=bytearray(pil.tobytes()))
             result = extract_position(img)
             pos = result.position
             black = sum(1 for c in pos.stones.values() if c == "black")
-            out = {"ok": True, "svg": render_svg(pos, coords=True), "json": pos.to_json(),
-                   "sgf": position_to_sgf(pos), "size": pos.size, "black": black,
-                   "white": len(pos.stones) - black, "marks": len(pos.marks),
-                   "labels": len(pos.labels), "warnings": list(result.warnings)}
+            out = {
+                "ok": True,
+                "svg": render_svg(pos, coords=True),
+                "json": pos.to_json(),
+                "sgf": position_to_sgf(pos),
+                "size": pos.size,
+                "black": black,
+                "white": len(pos.stones) - black,
+                "marks": len(pos.marks),
+                "labels": len(pos.labels),
+                "warnings": list(result.warnings),
+            }
         except ExtractionError as exc:
             out = {"ok": False, "kind": "extract", "message": str(exc)}
         except Exception as exc:

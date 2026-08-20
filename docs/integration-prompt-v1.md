@@ -51,21 +51,21 @@ from goban_svg.sgf import position_to_sgf, SgfError
 from goban_svg.board import Position
 
 # Input path 1 — raw pixels you decoded yourself (browser/canvas route):
-img = Image(width=w, height=h, pixels=bytearray(rgb))   # packed RGB8, len == w*h*3
+img = Image(width=w, height=h, pixels=bytearray(rgb))  # packed RGB8, len == w*h*3
 
 # Input path 2 — a PNG file/bytes (server route):
-img = load_image("board.png")                            # own PNG codec; JPEG needs Pillow installed
+img = load_image("board.png")  # own PNG codec; JPEG needs Pillow installed
 
-result = extract_position(img)      # raises ExtractionError on non-boards (fail-loud)
-pos = result.position               # size, stones, marks, labels
-warnings = result.warnings          # list[str] — MUST be shown to the user (see §6)
+result = extract_position(img)  # raises ExtractionError on non-boards (fail-loud)
+pos = result.position  # size, stones, marks, labels
+warnings = result.warnings  # list[str] — MUST be shown to the user (see §6)
 
-svg_text  = render_svg(pos, coords=True)   # coords=True is required for verification UX
-json_text = pos.to_json()                  # the human-editable interchange format
-sgf_text  = position_to_sgf(pos)           # lossy: mark colors are not preserved
+svg_text = render_svg(pos, coords=True)  # coords=True is required for verification UX
+json_text = pos.to_json()  # the human-editable interchange format
+sgf_text = position_to_sgf(pos)  # lossy: mark colors are not preserved
 
 # The correction loop (required feature, see §7):
-pos2 = Position.from_json(edited_json_text)   # raises ValueError with a clear message
+pos2 = Position.from_json(edited_json_text)  # raises ValueError with a clear message
 ```
 
 JSON schema (`pos.to_json()` emits exactly this shape; columns skip `I`, rows count from
