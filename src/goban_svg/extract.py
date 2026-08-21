@@ -1073,3 +1073,21 @@ def extract_position(img: Image) -> ExtractionResult:
 
     grid = GridFit(xs=xs, ys=ys, spacing=d, bbox=bbox)
     return ExtractionResult(position=position, grid=grid, warnings=warnings)
+
+
+def _fit_flat_axes(img: Image) -> tuple[list[float], float, list[float], float]:
+    """INTERNAL SHARED CONTRACT: robust per-axis grid fit of a flat board image.
+
+    Consumed by photo.py's corner auto-refinement (which runs it on rectified
+    photos) in addition to this module's own pipeline. Anyone retuning the
+    bbox/line/fit stages must keep this function's behavior or update photo
+    refinement in the same change -- the coupling is deliberate and named here
+    so it cannot be silently broken (photo ultra-review m8).
+
+    Returns (xs, dx, ys, dy): fitted line coordinates and spacing per axis.
+    """
+    px = _pixel_maps(img)
+    bbox = _wood_bbox(px)
+    xs, dx = _fit_grid(_line_projection(px, bbox, "x"), bbox[0], "x")
+    ys, dy = _fit_grid(_line_projection(px, bbox, "y"), bbox[1], "y")
+    return list(xs), dx, list(ys), dy

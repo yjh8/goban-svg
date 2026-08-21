@@ -272,7 +272,7 @@ def _cmd_photo(args: argparse.Namespace) -> int:
         "notice: photo mode is EXPERIMENTAL (uncalibrated against real photos) -- verify the result by hand",
         file=sys.stderr,
     )
-    result = extract_photo_position(load_image(image_path), args.corners, args.size)
+    result = extract_photo_position(load_image(image_path), args.corners, args.size, refine=not args.no_refine)
     _emit_warnings(result.warnings)
     position = result.position
 
@@ -370,6 +370,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="the four outer grid-line intersections, in TL TR BR BL order (source-image pixels)",
     )
     photo.add_argument("--size", type=int, default=19, help="board size, 2-25 (default: 19)")
+    photo.add_argument(
+        "--no-refine",
+        action="store_true",
+        help="trust the given corners exactly (default: corners are auto-refined against the "
+        "detected grid and only replaced when the refinement verifiably converges)",
+    )
     photo.add_argument(
         "-o", "--output", metavar="OUT.svg", type=Path, help="output SVG path (default: IMAGE with .svg extension)"
     )

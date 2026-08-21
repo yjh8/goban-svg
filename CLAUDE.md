@@ -46,6 +46,10 @@ UNCALIBRATED) + `goban-svg photo` CLI + 32 tests (459 total). Design review APPR
 axis-norm resolution gate → min singular value) — receipts stamped, all in
 docs/photo-mode-design.md. **Phase 2 (corner-picker UI) BLOCKED on real staff photos**
 (the calibration corpus; D-003). Deployed site unchanged today except CORS headers.
+**Evening: calibration finding #1** — Joseph's monitor photo extracted PERFECTLY once
+corners were right; thresholds blameless; shipped `refine_corners` iterative
+auto-refinement (default on, FAIL-CLOSED per ultra review) + `examples/photo-1`
+fixture with rough corners + `--no-refine` escape hatch. 471 tests. Gate now ultra/gpt-5.6-sol (fleet rule 2026-08-20); backgrounded codex needs < /dev/null (learned the hard way). Still needed: true physical-board photos (chroma constants unproven).
 
 ### 2026-08-19 — v0.1.0 genesis → shipped (Claude Code/Fable 5, joseph-macmini)
 

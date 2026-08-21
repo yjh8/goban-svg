@@ -258,7 +258,19 @@ def validate_corners(corners: Sequence[Corner]) -> tuple[Corner, Corner, Corner,
 
 
 def rectify_board(img: Image, corners: Sequence[Corner], size: int, cell: int = 24) -> Image: ...
-def extract_photo_position(img: Image, corners: Sequence[Corner], size: int) -> ExtractionResult: ...
+def refine_corners(img: Image, corners: Sequence[Corner], size: int) -> tuple[tuple[Corner, ...], bool]: ...
+
+
+# fail-CLOSED: corners are replaced ONLY on verified convergence; any doubt returns the
+# caller's corners with converged=False (skipped silently for size < 5)
+
+
+def extract_photo_position(
+    img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True
+) -> ExtractionResult: ...
+
+
+# refine=True (default) runs refine_corners first and warns when it fell back
 
 
 # stones only (photos carry no labels/marks); GridFit coordinates live in the RECTIFIED

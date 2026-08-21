@@ -531,3 +531,174 @@ def test_edge_cropped_board_is_symmetric():
     ]
     for a, b in mirrored_pairs:
         assert (a in found) == (b in found), f"edge asymmetry: {a.notation()} vs {b.notation()}"
+
+
+def test_refinement_beyond_envelope_stays_fail_loud():
+    # Calibration finding #1's measured envelope: refinement is exact to
+    # ~0.15-cell corner error (test_round_trip_large_corner_jitter) and on the
+    # gentler-perspective real photo converged from a 0.4-cell error. On THIS
+    # strongly-warped quad at ~0.18 cells the residual projective bias can
+    # remain -- the contract is then fail-LOUD: never a false stone, and any
+    # missed stone accompanied by warnings.
+    pos = _stones_9()
+    photo = _make_photo(pos, QUAD, 660, 520)
+    jit = ((10, -9), (-10, 8), (9, 10), (-8, -10))
+    jittered = [(x + dx, y + dy) for (x, y), (dx, dy) in zip(QUAD, jit, strict=True)]
+    result = extract_photo_position(photo, jittered, size=9)
+    baseline = extract_photo_position(photo, jittered, size=9, refine=False)
+    if any("auto-refinement" in w for w in result.warnings):
+        # fail-closed fallback: the result must EQUAL the untouched-corners read
+        assert result.position.stones == baseline.position.stones
+    else:
+        assert result.position.stones == pos.stones
+
+
+def test_refinement_falls_back_safely_on_unfittable_content():
+    # A featureless bright image inside a valid quad: the grid fit fails, the
+    # user's corners are kept, and the fallback is announced.
+    img = Image.new(500, 500, (210, 180, 120))
+    quad = ((40.0, 40.0), (460.0, 40.0), (460.0, 460.0), (40.0, 460.0))
+    result = extract_photo_position(img, quad, size=9)
+    assert result.position.stones == {}
+    assert any("auto-refinement" in w for w in result.warnings)
+
+
+def test_refine_false_trusts_corners_exactly():
+    pos = _stones_9()
+    photo = _make_photo(pos, QUAD, 660, 520)
+    with_r = extract_photo_position(photo, QUAD, size=9, refine=True)
+    without = extract_photo_position(photo, QUAD, size=9, refine=False)
+    assert with_r.position.stones == without.position.stones == pos.stones
+
+
+# --------------------------------------------------------------------------- #
+# Fail-closed refinement contract (ultra review B1/M2/M3/M4)
+# --------------------------------------------------------------------------- #
+
+
+def test_refinement_rejects_off_image_proposals(monkeypatch):
+    # r2 M3: the displacement must be UNDER the drift cap so that only the
+    # bounds guard can reject it -- local scale here is (360-40)/8 = 40 px,
+    # cap 24 px; the proposal moves TL by ~5.7px but lands at x = -1.
+    import goban_svg.photo as P
+
+    img = Image.new(400, 400, (200, 170, 110))
+    quad = ((3.0, 40.0), (360.0, 40.0), (360.0, 360.0), (40.0, 360.0))
+    bad = ((-1.0, 44.0), (360.0, 40.0), (360.0, 360.0), (40.0, 360.0))
+    assert math.dist(bad[0], quad[0]) < 0.6 * 40.0  # premise: inside the drift cap
+    monkeypatch.setattr(P, "_refine_once", lambda *a: (bad, (40.0,) * 4, True))
+    out, converged = P.refine_corners(img, quad, 9)
+    assert out == quad and not converged  # B1: only the bounds guard fires here
+
+
+def test_refinement_bounds_cumulative_drift(monkeypatch):
+    import goban_svg.photo as P
+
+    img = Image.new(600, 600, (200, 170, 110))
+    quad = ((40.0, 40.0), (560.0, 40.0), (560.0, 560.0), (40.0, 560.0))
+    # r2 M4: every proposed corner stays IN bounds so only the drift guard can
+    # reject -- local cell scale is (560-40)/8 = 65 px, cap 39 px; two 29-px
+    # steps in the same direction stay under 589+29=618 < 799 in an 800-wide
+    # image but exceed the cap CUMULATIVELY vs the original corners.
+    img = Image.new(800, 600, (200, 170, 110))
+    step = 0.45 * 65.0
+    calls = {"n": 0}
+
+    def fake(img_, corners, size):
+        calls["n"] += 1
+        moved = tuple((x + step, y) for x, y in corners)
+        return (moved, (65.0,) * 4, True)
+
+    monkeypatch.setattr(P, "_refine_once", fake)
+    out, converged = P.refine_corners(img, quad, 9)
+    assert out == quad and not converged
+    assert calls["n"] == 2  # pass 1 lawful, pass 2's cumulative drift rejected
+
+
+def test_refinement_pass_budget_exhaustion_is_not_success(monkeypatch):
+    import goban_svg.photo as P
+
+    img = Image.new(600, 600, (200, 170, 110))
+    quad = ((40.0, 40.0), (560.0, 40.0), (560.0, 560.0), (40.0, 560.0))
+    flip = {"n": 0}
+
+    def oscillate(img_, corners, size):
+        flip["n"] += 1
+        sign = 5.0 if flip["n"] % 2 else -5.0
+        return (tuple((x + sign, y) for x, y in corners), (65.0,) * 4, True)
+
+    monkeypatch.setattr(P, "_refine_once", oscillate)
+    out, converged = P.refine_corners(img, quad, 9)
+    assert out == quad and not converged  # M3: oscillation -> fail closed
+
+
+def test_refinement_later_pass_failure_returns_original(monkeypatch):
+    import goban_svg.photo as P
+
+    img = Image.new(600, 600, (200, 170, 110))
+    quad = ((40.0, 40.0), (560.0, 40.0), (560.0, 560.0), (40.0, 560.0))
+    state = {"n": 0}
+
+    def move_then_fail(img_, corners, size):
+        state["n"] += 1
+        if state["n"] == 1:
+            return (tuple((x + 5.0, y) for x, y in corners), (65.0,) * 4, True)
+        return (((0.0, 0.0),) * 4, (0.0,) * 4, False)
+
+    monkeypatch.setattr(P, "_refine_once", move_then_fail)
+    out, converged = P.refine_corners(img, quad, 9)
+    assert out == quad and not converged  # M4: no silent best-effort state
+
+
+def test_small_boards_skip_refinement_without_warning():
+    from goban_svg.render import render_png
+
+    pos = Position(size=3, stones={Point(2, 2): "black"})
+    flat = render_png(pos, cell=40)
+    lo = max(1, int(round(1.0 * 40))) + int(round(0.72 * 40))
+    hi = lo + 2 * 40
+    quad = ((float(lo), float(lo)), (float(hi), float(lo)), (float(hi), float(hi)), (float(lo), float(hi)))
+    result = extract_photo_position(flat, quad, size=3)
+    assert result.position.stones == pos.stones
+    assert not any("auto-refinement" in w for w in result.warnings)
+
+
+def test_extension_tie_is_refused(monkeypatch):
+    # r2 m5: an 18-line fit whose two completion splits score identically must
+    # refuse rather than guess a side (_EXTENSION_TIE_PX).
+    import goban_svg.extract as E
+    import goban_svg.photo as P
+
+    photo = _make_photo(Position(size=9), QUAD, 660, 520)
+
+    def tie_fit(img):
+        xs = [24.0 + 24.0 * k for k in range(9)]  # x axis complete: 24..216
+        # y axis: 8 lines centered in the x span (36..204) -- completing above
+        # or below scores identically (|12-24|+|204-216| == |36-24|+|228-216|)
+        ys = [36.0 + 24.0 * k for k in range(8)]
+        return xs, 24.0, ys, 24.0
+
+    monkeypatch.setattr(E, "_fit_flat_axes", tie_fit)
+    out, converged = P.refine_corners(photo, QUAD, 9)
+    assert out == tuple(QUAD) and not converged
+
+
+def test_refine_min_size_boundary(monkeypatch):
+    # r2 m6: size 4 skips refinement entirely; size 5 attempts it.
+    import goban_svg.photo as P
+
+    calls = []
+    real = P.refine_corners
+
+    def spy(img, corners, size):
+        calls.append(size)
+        return real(img, corners, size)
+
+    monkeypatch.setattr(P, "refine_corners", spy)
+    for size in (4, 5):
+        flat = render_png(Position(size=size), cell=40)
+        lo = max(1, int(round(1.0 * 40))) + int(round(0.72 * 40))
+        hi = lo + (size - 1) * 40
+        quad = ((float(lo), float(lo)), (float(hi), float(lo)), (float(hi), float(hi)), (float(lo), float(hi)))
+        P.extract_photo_position(flat, quad, size=size)
+    assert calls == [5]  # 4 never attempted; 5 attempted

@@ -34,7 +34,7 @@ from goban_svg.board import Point, Position
 from goban_svg.extract import ExtractionError, ExtractionResult, GridFit
 from goban_svg.png_codec import Image
 
-__all__ = ["extract_photo_position", "rectify_board", "validate_corners"]
+__all__ = ["extract_photo_position", "rectify_board", "refine_corners", "validate_corners"]
 
 Corner = tuple[float, float]
 
@@ -106,6 +106,16 @@ the photo (the validity mask). A disc mostly fed by edge-clamped fabricated
 pixels is unreliable; a reference patch even moderately fabricated is dropped
 (code review B1: clamped margins turned 1px grid lines into 37 phantom
 stones). UNCALIBRATED."""
+REFINE_MAX_SHIFT_CELLS = 0.6
+"""Auto-refinement may move a corner at most this many cells (in the photo).
+A larger proposed move means the grid fit locked onto something that is not
+the user's board -- keep the user's corners instead. Calibration finding #1
+(photo-1, 2026-08-20): a ±20px hand-placement error collapsed white-stone
+detection entirely, while robust refinement recovered a perfect board."""
+_REFINE_MAX_PASSES = 3
+_REFINE_MIN_SIZE = 5
+_EXTENSION_TIE_PX = 1.0
+_REFINE_CONVERGED_PX = 1.0
 _REPROJECTION_TOLERANCE = 0.5  # px; corner round-trip error above this = degenerate solve
 _MIN_CORNER_SEPARATION = 2.0  # px
 
@@ -392,9 +402,158 @@ def _classify_point(
     return (None, "ambiguous")
 
 
-def extract_photo_position(img: Image, corners: Sequence[Corner], size: int) -> ExtractionResult:
-    """Photo -> Position (stones only), via rectification + adaptive classification."""
+def _refine_once(
+    img: Image, corners: Sequence[Corner], size: int
+) -> tuple[tuple[Corner, ...], tuple[float, float, float, float], bool]:
+    """One refinement pass: (proposed corners, per-corner local cell scales, ok).
+
+    Rectify with the given corners, run the screenshot pipeline's robust grid
+    fitter on the flat image, back-project the fitted outer lines. Guards that
+    belong to a single pass live here (fit failure, extension ties); the
+    cumulative-drift, bounds, and convergence contracts live in
+    :func:`refine_corners`.
+    """
+    from goban_svg.extract import _fit_flat_axes
+
     cell = PHOTO_CELL
+    failed = ((0.0, 0.0),) * 4, (0.0, 0.0, 0.0, 0.0), False
+    try:
+        homography, margin = _build_homography(img, corners, size, cell)
+        canonical, valid, _m = _rectify_masked(img, corners, size, cell)
+        # Fabricated (edge-clamped) pixels must not vote in the grid fit either:
+        # paint them a neutral gray that is neither wood nor line-dark (m9).
+        for i, ok_px in enumerate(valid):
+            if not ok_px:
+                j = i * 3
+                canonical.pixels[j : j + 3] = b"\x80\x80\x80"
+        xs_f, dx, ys_f, dy = _fit_flat_axes(canonical)
+        fits = [(list(xs_f), dx), (list(ys_f), dy)]
+    except ExtractionError:
+        return failed
+
+    spans = []
+    for positions, spacing in fits:
+        missing = size - len(positions)
+        if missing < 0 or spacing <= 0:
+            return failed
+        spans.append((positions, spacing, missing))
+    # Extend a short axis to `size` lines; pick the up/down split whose span
+    # best mirrors the other axis (the canonical board is square). An
+    # unresolved tie between splits means the evidence cannot say which side
+    # the missing lines are on -- refuse rather than guess (review M5).
+    extended: list[list[float]] = []
+    for idx, (positions, spacing, missing) in enumerate(spans):
+        other = spans[1 - idx][0]
+        scored: list[tuple[float, list[float]]] = []
+        for up in range(missing + 1):
+            down = missing - up
+            cand = (
+                [positions[0] - spacing * k for k in range(up, 0, -1)]
+                + positions
+                + [positions[-1] + spacing * k for k in range(1, down + 1)]
+            )
+            scored.append((abs(cand[0] - other[0]) + abs(cand[-1] - other[-1]), cand))
+        scored.sort(key=lambda pair: pair[0])
+        if len(scored) > 1 and scored[1][0] - scored[0][0] < _EXTENSION_TIE_PX:
+            return failed
+        extended.append(scored[0][1])
+
+    xs, ys = extended
+    try:
+        # Back-projection and Jacobians can hit the projective-pole guard for a
+        # pathological extension -- that is a refusal, not a crash (r2 M2).
+        proposed = (
+            homography.map(xs[0], ys[0]),
+            homography.map(xs[-1], ys[0]),
+            homography.map(xs[-1], ys[-1]),
+            homography.map(xs[0], ys[-1]),
+        )
+        scales = tuple(
+            homography.local_cell_scale(u, v, cell)
+            for u, v in ((xs[0], ys[0]), (xs[-1], ys[0]), (xs[-1], ys[-1]), (xs[0], ys[-1]))
+        )
+        validate_corners(proposed)
+    except (ExtractionError, ValueError):
+        return failed
+    return (proposed, scales, True)
+
+
+def refine_corners(img: Image, corners: Sequence[Corner], size: int) -> tuple[tuple[Corner, ...], bool]:
+    """Fail-CLOSED corner auto-refinement: (corners, converged).
+
+    Human corner placement is the dominant error source in photo mode
+    (calibration finding #1, photo-1 2026-08-20: a ±20px hand error made white
+    stones vanish while every threshold was blameless). Structure of the fix:
+    rectify with the rough corners, run the screenshot pipeline's robust grid
+    fitter on the flat image, back-project the fitted outer lines -- and
+    ITERATE, because one pass inherits a small projective bias from the
+    imprecise first rectification (measured: 14.5px -> 0.4px in two passes on
+    the first real photo).
+
+    The contract (tightened by the ultra review, rounds B1/M2/M3/M4): corners
+    move ONLY when the iteration VERIFIABLY CONVERGES (a pass whose proposal
+    moved < _REFINE_CONVERGED_PX). Everything else -- fit failure at any pass,
+    oscillation through the pass budget, a proposal outside the image, or
+    cumulative drift beyond REFINE_MAX_SHIFT_CELLS of any corner's local cell
+    scale measured against the ORIGINAL corners -- returns the caller's
+    corners unchanged with ``converged=False``. There is no best-effort
+    middle state: unverified refinement is worthless precisely when it would
+    matter, and the caller's own corners plus a warning beat a silent drift.
+
+    Boards smaller than ``_REFINE_MIN_SIZE`` return immediately (the robust
+    fitter needs >= 3 lines per axis; a 2x2 quad cannot be refined).
+    """
+    original = tuple(validate_corners(corners))
+    if size < _REFINE_MIN_SIZE:
+        return (original, False)
+    # Freeze the drift budget in the ORIGINAL corners' geometry: per-pass
+    # homographies can inflate their own scales and quietly grow the envelope
+    # (r2 M1). A failed initial build is a refusal like any other.
+    try:
+        origin_h, _m = _build_homography(img, original, size, PHOTO_CELL)
+        margin = PHOTO_MARGIN_CELLS * PHOTO_CELL
+        span = (size - 1) * PHOTO_CELL
+        origin_scales = tuple(
+            origin_h.local_cell_scale(u, v, PHOTO_CELL)
+            for u, v in (
+                (margin, margin),
+                (margin + span, margin),
+                (margin + span, margin + span),
+                (margin, margin + span),
+            )
+        )
+    except ExtractionError:
+        return (original, False)
+    current = original
+    for _ in range(_REFINE_MAX_PASSES):
+        proposed, _scales, ok = _refine_once(img, current, size)
+        if not ok:
+            return (original, False)
+        for i, (pt, orig) in enumerate(zip(proposed, original, strict=True)):
+            if not (0.0 <= pt[0] <= img.width - 1.0 and 0.0 <= pt[1] <= img.height - 1.0):
+                return (original, False)  # review B1: never propose off-image corners
+            if math.dist(pt, orig) > REFINE_MAX_SHIFT_CELLS * origin_scales[i]:
+                return (original, False)  # r2 M1: cumulative, per-corner, frozen at the original geometry
+        shift = max(math.dist(a, b) for a, b in zip(proposed, current, strict=True))
+        current = proposed
+        if shift < _REFINE_CONVERGED_PX:
+            return (current, True)
+    return (original, False)  # review M3: pass-budget exhaustion is NOT success
+
+
+def extract_photo_position(
+    img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True
+) -> ExtractionResult:
+    """Photo -> Position (stones only), via rectification + adaptive classification.
+
+    ``refine=True`` (default) runs the fail-safe corner auto-refinement first;
+    pass ``refine=False`` to trust the given corners exactly.
+    """
+    cell = PHOTO_CELL
+    refined = False
+    refine_attempted = refine and size >= _REFINE_MIN_SIZE
+    if refine_attempted:
+        corners, refined = refine_corners(img, corners, size)
     canonical, valid, margin = _rectify_masked(img, corners, size, cell)
     span = (size - 1) * cell
     disc_r = DISC_RADIUS_RATIO * cell
@@ -481,6 +640,11 @@ def extract_photo_position(img: Image, corners: Sequence[Corner], size: int) -> 
             )
         # else: confidently empty, silently.
 
+    if refine_attempted and not refined:
+        warnings.append(
+            "corner auto-refinement could not verify the grid -- your corners were used as given; "
+            "if stones look shifted, re-place the corners more precisely"
+        )
     xs = [margin + i * cell for i in range(size)]
     interior = int(round(margin))
     grid = GridFit(

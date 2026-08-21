@@ -93,3 +93,28 @@ spend its effort on the real-input acceptance loop instead of re-deriving decisi
 
 *(Joseph: if the cloud session had additional failure modes beyond what its handoff recorded,
 add them here — this file is the migration's history.)*
+
+## Photo calibration #1: fix the geometry before touching thresholds (2026-08-20b)
+
+The first real photo made every white stone vanish, and the reflex was "the
+thresholds are wrong." They weren't — the hand-placed corners were ~0.4 cells
+off, discs sampled stone edges, and the weakest class (white-on-wood) died
+first. Fixing geometry (iterative corner auto-refinement reusing the proven
+robust grid fitter) recovered a perfect board with zero threshold changes.
+Rule: when a classifier degrades on new inputs, verify the sampling geometry
+against ground truth FIRST — a rectified-image overlay showed the misalignment
+in seconds. Also recorded: the naive refinements both failed (first/last raw
+peaks → moiré poisoned; local crossing centroids → moiré-biased) — only the
+full robust fit (median-gap + residual rejection) survived, which is an
+argument for reusing battle-tested estimators over writing quick local ones.
+
+## Backgrounded codex needs `< /dev/null` (2026-08-21)
+
+Two review runs hung 45+ minutes at "Reading additional input from stdin...":
+a backgrounded shell hands codex an open stdin pipe that never EOFs, and codex
+waits for piped input BEFORE creating its session (so no session file appears —
+that absence is the diagnostic tell). Append `< /dev/null` to every
+non-interactive codex invocation. Diagnosis path that worked: session-file
+absence → smoke tests proving model/config healthy → unswallowing the streamed
+output revealed the stdin prompt. The codex-gate skill's own docs already
+prescribe this; reading them first would have saved an hour.

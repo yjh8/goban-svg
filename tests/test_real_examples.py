@@ -60,3 +60,23 @@ def test_board2_and_board3_acceptance_highlights() -> None:
     assert pos3.stones[Point.parse("C3")] == "black"
     assert pos3.marks[Point.parse("C15")] == Mark("square", "white")
     assert not pos3.labels
+
+
+def test_photo1_real_monitor_photo_with_rough_corners() -> None:
+    # The first real-photo calibration fixture (2026-08-20): a phone photo of a
+    # monitor -- moire banding, glare, perspective tilt. The corners given here
+    # are the ORIGINAL rough hand estimates (up to ~0.4 cells off), so this
+    # test also pins the corner auto-refinement path that recovered them
+    # (calibration finding #1). Verified by hand against the rectified image.
+    from goban_svg.photo import extract_photo_position
+
+    result = extract_photo_position(
+        load_image(EXAMPLES / "photo-1.png"),
+        [(261, 124), (1228, 112), (1119, 951), (340, 956)],
+        size=19,
+    )
+    expected = json.loads((EXAMPLES / "photo-1.json").read_text(encoding="utf-8"))
+    assert result.position.to_json_dict() == expected
+    # Edge moire produces a handful of honest ambiguity warnings; what must
+    # NEVER appear is a refinement fallback (the grid fit works on this photo).
+    assert not any("auto-refinement" in w for w in result.warnings)

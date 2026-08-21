@@ -572,3 +572,23 @@ def test_photo_sidecar_protection_and_force(tmp_path, capsys):
     captured = capsys.readouterr()
     assert rc == 1 and "preserved" in captured.err
     assert main(["photo", str(path), "--corners", *corners, "--size", "9", "--force"]) == 0
+
+
+def test_photo_no_refine_flag_forwards(monkeypatch, tmp_path):
+    # r2 m7: --no-refine must wire through as refine=False (and default True).
+    import goban_svg.cli as cli_mod
+    from goban_svg.board import Position
+    from goban_svg.extract import ExtractionResult, GridFit
+
+    path, corners, _ = _photo_fixture(tmp_path)
+    seen = []
+
+    def fake(img, corner_list, size, *, refine=True):
+        seen.append(refine)
+        grid = GridFit(xs=[0.0], ys=[0.0], spacing=1.0, bbox=(0, 0, 1, 1))
+        return ExtractionResult(position=Position(size=size), grid=grid, warnings=[])
+
+    monkeypatch.setattr(cli_mod, "extract_photo_position", fake)
+    assert main(["photo", str(path), "--corners", *corners, "--size", "9", "--force"]) == 0
+    assert main(["photo", str(path), "--corners", *corners, "--size", "9", "--no-refine", "--force"]) == 0
+    assert seen == [True, False]

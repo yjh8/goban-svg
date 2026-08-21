@@ -73,8 +73,10 @@ def order_corners(corners: Sequence[Corner]) -> tuple[Corner, Corner, Corner, Co
 def rectify_board(img: Image, corners: Sequence[Corner], size: int, cell: int = 24) -> Image
     # homography warp to the canonical flat board (margin = cell)
 
-def extract_photo_position(img: Image, corners: Sequence[Corner], size: int) -> ExtractionResult
-    # full pipeline; warnings include the standing 實驗性 notice + per-point ambiguity;
+def extract_photo_position(img: Image, corners: Sequence[Corner], size: int,
+                           *, refine: bool = True) -> ExtractionResult
+    # refine=True (default) auto-refines the corners first (fail-closed; see
+    # refine_corners in the Calibration log) and warns when it fell back;
     # GridFit carries the canonical grid (xs/ys in canonical px, spacing=cell)
 ```
 
@@ -83,9 +85,11 @@ def extract_photo_position(img: Image, corners: Sequence[Corner], size: int) -> 
 
 ## 5. CLI
 
-`goban-svg photo IMAGE --corners "x1,y1 x2,y2 x3,y3 x4,y4" --size 19 [-o OUT.svg]
-[--json PATH] [--sgf PATH] [--ascii] [--preview OUT.png]` — same output conventions as
-`convert`. Exists primarily so the engine is testable/scriptable without the UI.
+`goban-svg photo IMAGE --corners X1,Y1 X2,Y2 X3,Y3 X4,Y4 --size 19 [--no-refine]
+[-o OUT.svg] [--json PATH] [--sgf PATH] [--ascii] [--preview OUT.png] [--force]` — four
+separate corner arguments (TL TR BR BL), same output conventions as `convert`; corners
+are auto-refined by default, `--no-refine` trusts them exactly. Exists primarily so the
+engine is testable/scriptable without the UI.
 
 ## 6. Web UI (worker gains one op; page gains a mode)
 
@@ -201,3 +205,40 @@ honesty, MAD literals hoisted to UNCALIBRATED tunables, and the test matrix was
 expanded (asymmetric resolution quad, exact bilinear/clamp micro-tests, decision-table
 unit tests, ±35% gradients + vignette, KGS palette, occupied-majority board, 0.15-cell
 corner jitter, CLI photo negative tests).
+
+## Calibration log
+
+### Finding #1 — photo-1 (2026-08-20, phone photo of a monitor; Joseph)
+
+Stress profile: moiré banding, glare gradients, perspective tilt, screen bezel.
+- **The classifier thresholds were blameless.** With well-placed corners the
+  UNCALIBRATED thresholds read the board perfectly (9 black, 8 white, zero false
+  stones; only honest edge-moiré warnings). No threshold was changed.
+- **Corner placement error was the dominant failure mode**: a ±20 px (~0.4-cell)
+  hand estimate collapsed white detection to 1/8 (discs sampled stone edges;
+  whites' ΔL slid under the floor while blacks survived on raw contrast).
+- **Structural fix shipped — `refine_corners` (default on)**: rectify with rough
+  corners → run the screenshot pipeline's robust grid fitter on the flat image
+  (it survives moiré that defeats naive peak-picking; a naive first/last-peak
+  version made things WORSE) → extend a short axis by mirroring the other axis'
+  span → back-project → iterate ≤3 passes (real photo: 14.5 px → 0.4 px in two).
+  Fail-CLOSED (tightened by the ultra review): corners move ONLY on verified
+  convergence (a pass whose proposal moved < 1 px). Fit failure at any pass,
+  oscillation through the pass budget, an off-image proposal, an unresolved
+  extension tie, or cumulative drift beyond 0.6 of any corner's local cell
+  scale measured against the ORIGINAL corners — all return the caller's
+  corners unchanged, and extraction warns. There is no best-effort middle
+  state. Boards < 5 lines skip refinement silently (the fitter needs 3+
+  lines). A local corner-crossing centroid measurement was tried and REJECTED
+  (moiré biases the centroid — recorded so nobody re-invents it).
+- **Measured envelope**: exact recovery to ~0.15-cell corner error on a harsh
+  synthetic quad and from 0.4-cell error on the real photo's gentler
+  perspective; beyond that the iteration fails to converge and the FAIL-CLOSED
+  contract applies — the caller's corners are used unchanged with a warning
+  (equivalent to refine=False), never an unverified drifted state. Deeper least-squares homography updates from all 38
+  fitted lines remain an option if staff photos need it.
+- Fixture: `examples/photo-1.{png,json,svg}` + a regression test that feeds the
+  ROUGH corners, pinning the refinement path end to end.
+- Still needed from staff: true PHYSICAL-board photos (wood grain, real stones,
+  shadows) — a monitor photo shares the app's rendered palette, so wood/stone
+  chroma constants remain unproven on real materials.
