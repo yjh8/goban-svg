@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 
 from goban_svg.board import WEDGE_BLUE, WEDGE_RED, Mark, Point, Position, ascii_diagram, star_points
-from goban_svg.extract import ExtractionError, ExtractionResult, extract_position
+from goban_svg.extract import ExtractionError, ExtractionResult, GridFit, UncertainPoint, extract_position
 from goban_svg.png_codec import Image
 from goban_svg.render import KGS_PALETTE, Palette, render_png
 
@@ -396,3 +396,95 @@ def test_oversized_grid_is_rejected_before_notation_breaks() -> None:
             img.set(t, p, line)
     with pytest.raises(ExtractionError, match="2-25"):
         extract_position(img)
+
+
+# --------------------------------------------------------------------------- #
+# Structured uncertainty (webapp-design.md v2 payload item 2 / v3)
+# --------------------------------------------------------------------------- #
+
+
+def _paint_disc(img: Image, cx: int, cy: int, radius: float, rgb: tuple[int, int, int]) -> None:
+    for y in range(int(cy - radius), int(cy + radius) + 1):
+        for x in range(int(cx - radius), int(cx + radius) + 1):
+            if (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius:
+                img.set(x, y, rgb)
+
+
+def _painted_xy(col: int, row: int, size: int, cell: int) -> tuple[int, int]:
+    """Image (x, y) of a board point in a render_png raster (frame 1.0c + margin 0.72c)."""
+    origin = max(1, int(round(1.0 * cell))) + int(round(0.72 * cell))
+    return (origin + (col - 1) * cell, origin + (size - row) * cell)
+
+
+def _doubtful_board() -> Image:
+    """A 9x9 painted to make the extractor doubt exactly two points, one per kind.
+
+    D4 -- a black stone whose center is overpainted neutral gray: the 0.20c color
+    disc lands between the two thresholds while the 0.36c ring still reads black,
+    which is the one genuinely ambiguous case `_stone_color` warns about.
+    F6 -- a black stone carrying a solid white 5x5 block: big enough to be a glyph
+    (>= MIN_GLYPH_PIXELS), shaped like no digit, offset from the center so it can
+    neither drag the disc median nor reach far enough to be taken for a wedge.
+    """
+    pos = Position(size=9, stones={Point(4, 4): "black", Point(6, 6): "black"})
+    img = render_png(pos, cell=CELL)
+    cx, cy = _painted_xy(4, 4, 9, CELL)
+    _paint_disc(img, cx, cy, 0.26 * CELL, (135, 135, 135))
+    cx, cy = _painted_xy(6, 6, 9, CELL)
+    for y in range(cy - 2, cy + 3):
+        for x in range(cx + 2, cx + 7):
+            img.set(x, y, (255, 255, 255))
+    return img
+
+
+def test_uncertain_mirrors_the_point_warnings_verbatim() -> None:
+    """Every entry pairs with its warning; the warning STRINGS stay frozen.
+
+    The strings are asserted literally, not by substring: blindspot regex-parses
+    them and the integration prompt publishes them, so 0.1.1 may append the
+    structured mirror but may not touch one byte of the prose (v3 'frozen' rule).
+    """
+    result = extract_position(_doubtful_board())
+
+    assert result.warnings == [
+        "ambiguous stone color at D4 (disc luminance 135); read as black",
+        "unreadable label on the black stone at F6 -- check it by hand",
+    ]
+    assert result.uncertain == [
+        UncertainPoint(point=Point(col=4, row=4), kind="ambiguous-color"),
+        UncertainPoint(point=Point(col=6, row=6), kind="unreadable-label"),
+    ]
+    # Pairing, index by index: the i-th entry belongs to the i-th point warning,
+    # in the extractor's own scan order (columns left to right).
+    for entry, warning in zip(result.uncertain, result.warnings, strict=True):
+        assert entry.point.notation() in warning
+    assert result.position.stones == {Point(4, 4): "black", Point(6, 6): "black"}
+    assert result.position.labels == {}  # the unreadable glyph produced no guess
+
+
+def test_confident_extraction_has_no_uncertain_entries() -> None:
+    result = extract(rich_19(), noise=3, seed=1)
+    assert result.warnings == []
+    assert result.uncertain == []
+
+
+def test_non_point_warnings_produce_no_uncertain_entries() -> None:
+    """The board-size warning names no point, so it gets no review ring."""
+    pos = Position(size=11, stones={Point(1, 1): "black", Point(11, 11): "white"})
+    result = extract(pos, noise=3, seed=1)
+    assert any("11x11" in w for w in result.warnings)
+    assert result.uncertain == []
+
+
+def test_extraction_result_still_takes_three_positional_args() -> None:
+    """v3 backward compatibility: `uncertain` was APPENDED with a default.
+
+    Every 0.1.0 construction site -- ours and any caller's -- passes exactly three
+    positional arguments, so the field may not be inserted or made required.
+    """
+    grid = GridFit(xs=[0.0, 1.0], ys=[0.0, 1.0], spacing=1.0, bbox=(0, 0, 1, 1))
+    first = ExtractionResult(Position(size=9), grid, ["a warning"])
+    second = ExtractionResult(Position(size=9), grid, [])
+    assert first.uncertain == [] and second.uncertain == []
+    first.uncertain.append(UncertainPoint(point=Point(1, 1), kind="ambiguous-color"))
+    assert second.uncertain == []  # default_factory, not a shared mutable default

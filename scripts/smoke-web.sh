@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # Deployed smoke check for the goban-svg web app (web code review M10).
-#   scripts/smoke-web.sh [base-url] [wheel-filename]
+#   scripts/smoke-web.sh [base-url] [wheel-filename] [manifest-path]
 # Asserts: index served with the strict CSP + noindex, the wheel and pyodide
-# runtime are fetchable, and gen/config.js names the expected wheel.
+# runtime are fetchable, gen/config.js names the expected wheel, and EVERY wheel
+# in the local (repo, trusted) web/wheels/SHA256SUMS manifest still serves its
+# exact published bytes — published wheel URLs are immutable, so an integrator's
+# pinned URL+hash must keep matching forever (webapp-design.md v3 amendment 1).
+# The manifest is read from the repo, never from the deployed site: the repo copy
+# is the trust anchor a bad deploy cannot rewrite.
 
 set -euo pipefail
 BASE="${1:-https://goban-svg.pages.dev}"
 WHEEL="${2:-}"
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+MANIFEST="${3:-$REPO_ROOT/web/wheels/SHA256SUMS}"
 
 fail() { echo "SMOKE FAIL: $1" >&2; exit 1; }
 
@@ -23,4 +30,25 @@ curl -fsSI "$BASE/pyodide/pyodide.mjs" | grep -q "200" || fail "pyodide.mjs not 
 curl -fsSI "$BASE/pyodide/pyodide.asm.wasm" | grep -q "200" || fail "wasm not fetchable"
 curl -fsS "$BASE/" | grep -q "棋譜圖" || fail "index content unexpected"
 
-echo "SMOKE OK: $BASE ($W)"
+# --- published wheel archive: every URL still serves its original bytes ---
+[ -f "$MANIFEST" ] || fail "wheel manifest not found: $MANIFEST"
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
+COUNT=0
+CURRENT_LISTED=0
+while read -r want name || [ -n "${want:-}" ]; do
+  [ -n "${want:-}" ] || continue
+  name="${name#\*}"
+  [ -n "${name:-}" ] || fail "malformed line in $MANIFEST: $want"
+  [ ${#want} -eq 64 ] || fail "malformed sha256 in $MANIFEST: $want"
+  case "$want" in *[!0-9a-f]*) fail "malformed sha256 in $MANIFEST: $want" ;; esac
+  curl -fsSL "$BASE/wheels/$name" -o "$TMPD/wheel.bin" || fail "published wheel $name not fetchable"
+  got=$(shasum -a 256 "$TMPD/wheel.bin" | cut -d' ' -f1)
+  [ "$got" = "$want" ] || fail "published wheel $name changed: served $got, manifest says $want (published wheel URLs are immutable)"
+  if [ "$name" = "$W" ]; then CURRENT_LISTED=1; fi
+  COUNT=$((COUNT + 1))
+done < "$MANIFEST"
+[ "$COUNT" -gt 0 ] || fail "no wheels listed in $MANIFEST"
+[ "$CURRENT_LISTED" = 1 ] || fail "config.js names $W, which is not in $MANIFEST"
+
+echo "SMOKE OK: $BASE ($W; $COUNT published wheel(s) sha256-verified)"

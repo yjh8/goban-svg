@@ -28,13 +28,21 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from statistics import median
 
 from goban_svg.board import Point, Position
-from goban_svg.extract import ExtractionError, ExtractionResult, GridFit
+from goban_svg.extract import ExtractionError, ExtractionResult, GridFit, UncertainPoint, _note_uncertain
 from goban_svg.png_codec import Image
 
-__all__ = ["extract_photo_position", "rectify_board", "refine_corners", "validate_corners"]
+__all__ = [
+    "PhotoArtifact",
+    "extract_photo_artifact",
+    "extract_photo_position",
+    "rectify_board",
+    "refine_corners",
+    "validate_corners",
+]
 
 Corner = tuple[float, float]
 
@@ -541,20 +549,51 @@ def refine_corners(img: Image, corners: Sequence[Corner], size: int) -> tuple[tu
     return (original, False)  # review M3: pass-budget exhaustion is NOT success
 
 
-def extract_photo_position(
-    img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True
-) -> ExtractionResult:
-    """Photo -> Position (stones only), via rectification + adaptive classification.
+@dataclass(frozen=True)
+class PhotoArtifact:
+    """Everything ONE photo extraction produced -- result, and its by-products.
 
-    ``refine=True`` (default) runs the fail-safe corner auto-refinement first;
-    pass ``refine=False`` to trust the given corners exactly.
+    The by-products exist because the web app needs them and re-deriving them
+    would mean rectifying twice: measured on a phone-sized photo, rectification
+    costs ~2.5 s against ~0.1 s for classification (webapp-design.md review F7),
+    so a second pass would more than double the wait for a picture the user has
+    already been shown. ``canonical`` is the very image the classifier read --
+    the same object, not an equivalent one -- so the grid the checkpoint draws is
+    provably the grid the stones were read against (v3 amendment 2).
+
+    ``corners_used`` is what the rectification actually ran on: the caller's
+    corners, or auto-refinement's if it verifiably converged. ``refined`` says
+    which, and the caller owns that flag from there on (the engine will not
+    re-derive it on a re-render).
+    """
+
+    result: ExtractionResult
+    canonical: Image
+    refined: bool
+    corners_used: tuple[Corner, ...]
+
+
+def extract_photo_artifact(img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True) -> PhotoArtifact:
+    """Photo -> :class:`PhotoArtifact`, with ONE classification rectification.
+
+    The whole of photo extraction (design amendments; v3 amendment 2): fail-safe
+    corner auto-refinement (which internally rectifies once per pass, up to
+    ``_REFINE_MAX_PASSES`` times), then exactly one masked rectification whose
+    output feeds both the classifier and ``PhotoArtifact.canonical`` -- the
+    classification image is never rectified twice. ``refine=True`` (default)
+    runs the auto-refinement first; ``refine=False`` trusts the given corners
+    exactly (and then the single rectification is the only one at all).
+
+    :func:`extract_photo_position` is the thin wrapper for callers that want only
+    the position.
     """
     cell = PHOTO_CELL
     refined = False
     refine_attempted = refine and size >= _REFINE_MIN_SIZE
     if refine_attempted:
         corners, refined = refine_corners(img, corners, size)
-    canonical, valid, margin = _rectify_masked(img, corners, size, cell)
+    corners_used = validate_corners(corners)
+    canonical, valid, margin = _rectify_masked(img, corners_used, size, cell)
     span = (size - 1) * cell
     disc_r = DISC_RADIUS_RATIO * cell
     ref_r = REF_RADIUS_RATIO * cell
@@ -610,6 +649,8 @@ def extract_photo_position(
     # Pass 2 -- two-stage decision: occupancy, then color.
     position = Position(size=size)
     warnings: list[str] = []
+    uncertain: list[UncertainPoint] = []
+    seen: set[tuple[Point, str]] = set()
     for entry in stats:
         pt = entry[0]
         if entry[1] is None:
@@ -623,6 +664,7 @@ def extract_photo_position(
                     f"no reliable wood reference around {pt.notation()} (shadow or stone bleed?) -- "
                     "left empty; check it by hand"
                 )
+            _note_uncertain(uncertain, seen, pt, kind)
             continue
         _, delta_l, disc_warmth, wood_warmth, low_ref = entry
         color, warn_kind = _classify_point(delta_l, disc_warmth, wood_warmth, low_ref, t_empty)
@@ -633,14 +675,19 @@ def extract_photo_position(
                 f"bright point at {pt.notation()} is as warm as the surrounding wood -- glare or a "
                 "pale marking? left empty; check it by hand"
             )
+            _note_uncertain(uncertain, seen, pt, "warm-bright")
         elif warn_kind == "ambiguous":
             warnings.append(
                 f"ambiguous point at {pt.notation()} (contrast {delta_l:+.0f} against its local wood) -- "
                 "left empty; check it by hand"
             )
+            _note_uncertain(uncertain, seen, pt, "ambiguous")
         # else: confidently empty, silently.
 
     if refine_attempted and not refined:
+        # Names no point, so it gets no `uncertain` entry: the doubt is about the
+        # whole grid, and the UI answers it with "re-place the corners", not with
+        # a ring on one intersection.
         warnings.append(
             "corner auto-refinement could not verify the grid -- your corners were used as given; "
             "if stones look shifted, re-place the corners more precisely"
@@ -653,4 +700,20 @@ def extract_photo_position(
         spacing=float(cell),
         bbox=(interior, interior, interior + span, interior + span),
     )
-    return ExtractionResult(position=position, grid=grid, warnings=warnings)
+    result = ExtractionResult(position=position, grid=grid, warnings=warnings, uncertain=uncertain)
+    return PhotoArtifact(result=result, canonical=canonical, refined=refined, corners_used=corners_used)
+
+
+def extract_photo_position(
+    img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True
+) -> ExtractionResult:
+    """Photo -> Position (stones only), via rectification + adaptive classification.
+
+    ``refine=True`` (default) runs the fail-safe corner auto-refinement first;
+    pass ``refine=False`` to trust the given corners exactly.
+
+    A thin wrapper over :func:`extract_photo_artifact` since 0.1.1 -- same
+    signature, same result, same warnings; it simply drops the by-products a
+    caller that only wants the position has no use for.
+    """
+    return extract_photo_artifact(img, corners, size, refine=refine).result

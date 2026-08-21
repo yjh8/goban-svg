@@ -42,14 +42,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import median
 
 from goban_svg import digits
 from goban_svg.board import WEDGE_BLUE, WEDGE_RED, Mark, Point, Position
 from goban_svg.png_codec import Image
 
-__all__ = ["ExtractionError", "ExtractionResult", "GridFit", "extract_position"]
+__all__ = ["ExtractionError", "ExtractionResult", "GridFit", "UncertainPoint", "extract_position"]
 
 
 # --------------------------------------------------------------------------- #
@@ -302,6 +302,26 @@ class GridFit:
     bbox: tuple[int, int, int, int]
 
 
+@dataclass(frozen=True)
+class UncertainPoint:
+    """One doubt, addressed to a specific point, in machine-readable form.
+
+    The *same* doubt the matching entry in :attr:`ExtractionResult.warnings`
+    states in prose -- this is not a second opinion, it is the prose one with its
+    point and reason already parsed out, so a UI can ring the point instead of
+    regex-ing the sentence. ``kind`` is one of the classification kinds
+    ``"ambiguous-color"`` / ``"ambiguous"`` / ``"warm-bright"``, the annotation
+    kind ``"unreadable-label"``, or the photo-geometry kinds ``"off-image"`` /
+    ``"no-reference"`` (webapp-design.md 2026-08-21 v2, payload item 2).
+
+    The warning STRINGS stay frozen byte for byte -- callers parse them today --
+    so this rides alongside them rather than replacing them.
+    """
+
+    point: Point
+    kind: str
+
+
 @dataclass
 class ExtractionResult:
     """What :func:`extract_position` found, plus everything it was unsure about."""
@@ -309,6 +329,30 @@ class ExtractionResult:
     position: Position
     grid: GridFit
     warnings: list[str]
+    uncertain: list[UncertainPoint] = field(default_factory=list)
+    """Point-addressed mirror of the point-naming ``warnings``, same scan order.
+
+    Appended in 0.1.1 with a default, so every existing three-positional-argument
+    construction keeps working. Not every warning has an entry (board size, grid
+    anisotropy, crop margin and the photo refinement fallback name no point) and
+    absence of an entry is NOT a confidence claim -- see the calibration log's
+    finding #2, where nine white stones were misread with no warning at all.
+    """
+
+
+def _note_uncertain(entries: list[UncertainPoint], seen: set[tuple[Point, str]], point: Point, kind: str) -> None:
+    """Record one review point, suppressing an exact ``(point, kind)`` repeat.
+
+    INTERNAL SHARED CONTRACT: photo.py builds the same list from its own scan, so
+    the append-in-scan-order and no-duplicates rules live in one place. Called
+    immediately after the warning it mirrors, never on its own -- an entry with no
+    warning behind it would be a second, unfrozen uncertainty API.
+    """
+    key = (point, kind)
+    if key in seen:
+        return
+    seen.add(key)
+    entries.append(UncertainPoint(point=point, kind=kind))
 
 
 def _smooth(values: Sequence[float], window: int) -> list[float]:
@@ -1044,6 +1088,8 @@ def extract_position(img: Image) -> ExtractionResult:
     disc_radius = DISC_RADIUS_RATIO * d
     ring_radius = RING_RADIUS_RATIO * d
     position = Position(size=size)
+    uncertain: list[UncertainPoint] = []
+    seen: set[tuple[Point, str]] = set()
 
     for xi, cx in enumerate(xs):
         for yi, cy in enumerate(ys):
@@ -1056,6 +1102,7 @@ def extract_position(img: Image) -> ExtractionResult:
                 position.stones[point] = color
                 if warning:
                     warnings.append(warning)
+                    _note_uncertain(uncertain, seen, point, "ambiguous-color")
                 wedge = _detect_wedge(px, cx, cy, d, color)
                 wedge_pixels = None
                 if wedge is not None:
@@ -1066,13 +1113,14 @@ def extract_position(img: Image) -> ExtractionResult:
                     position.labels[point] = label
                 if warning:
                     warnings.append(warning)
+                    _note_uncertain(uncertain, seen, point, "unreadable-label")
             elif non_wood >= MARK_MIN_NONWOOD:
                 # Solid, no ring: a marker painted on an empty point (gotcha G4).
                 color = "black" if disc_median < AMBIGUOUS_DISC_SPLIT else "white"
                 position.marks[point] = Mark(type="square", color=color)
 
     grid = GridFit(xs=xs, ys=ys, spacing=d, bbox=bbox)
-    return ExtractionResult(position=position, grid=grid, warnings=warnings)
+    return ExtractionResult(position=position, grid=grid, warnings=warnings, uncertain=uncertain)
 
 
 def _fit_flat_axes(img: Image) -> tuple[list[float], float, list[float], float]:

@@ -31,7 +31,7 @@ and your instincts disagree, the spec wins.**
 | Item | Value |
 |---|---|
 | Engine wheel URL (runtime, CORS-enabled) | `https://goban-svg.pages.dev/wheels/goban_svg-0.1.0-py3-none-any.whl` |
-| Wheel SHA-256 | `5964bad5d9f5c0a5c0b8bf47d55a359953d3249e23dbe0d82ea3cb7942c7c836` |
+| Wheel SHA-256 | `02b158f7145f6ac2aee2d0680651e2dba26671e7c9320439aa7a207beb074cb3` |
 | Expected `goban_svg.__version__` | `0.1.0` |
 | Pyodide version (pinned) | `314.0.5` |
 | Pyodide module URL | `https://cdn.jsdelivr.net/pyodide/v314.0.5/full/pyodide.mjs` |
@@ -42,6 +42,31 @@ If the app has a Content-Security-Policy, it must allow:
 `script-src: https://cdn.jsdelivr.net 'wasm-unsafe-eval'` and
 `connect-src: https://cdn.jsdelivr.net https://goban-svg.pages.dev`.
 If there is no CSP (default for a plain Next.js app), nothing to do.
+
+> **2026-08-21 — corrected wheel hash + wheel URLs are immutable from now on.**
+> The SHA-256 published in earlier copies of this spec (`5964bad5…`) is **stale**: the
+> bytes at that URL were replaced by a later redeploy, back when the deploy script
+> rebuilt and overwrote the wheel in place. The value in the table above
+> (`02b158f7…`) is the sha256 of the bytes `…/wheels/goban_svg-0.1.0-py3-none-any.whl`
+> serves today — verify with `shasum -a 256 <downloaded wheel>`. Nothing in your
+> integration breaks because of this (the wheel is loaded at runtime and the engine's
+> behaviour is unchanged), but if you pinned the old hash anywhere, update it.
+>
+> **From now on a published wheel URL never changes bytes.** Every released wheel is
+> kept byte-for-byte in a tracked archive with a `SHA256SUMS` manifest; the deploy
+> script refuses to replace an existing wheel filename with different bytes, and the
+> post-deploy smoke check re-downloads *every* published wheel and verifies its
+> sha256. So the URL + hash in the table above stay valid indefinitely.
+>
+> **New versions get a new URL.** `0.1.1` — purely additive: an
+> `ExtractionResult.uncertain` list of `{point, kind}` review points alongside the
+> unchanged `warnings`, plus a `PhotoArtifact` / `extract_photo_artifact()` API for
+> photo mode — will live at
+> `https://goban-svg.pages.dev/wheels/goban_svg-0.1.1-py3-none-any.whl` once it is
+> deployed (ask Joseph for its sha256 then; it is not published as of this note).
+> Every warning string in §7 is frozen byte-for-byte across versions. Upgrading is
+> your own atomic switch of URL + hash + `EXPECTED_VERSION`, on your schedule —
+> staying on 0.1.0 keeps working.
 
 ## §2 — Deliverables (exact file manifest)
 

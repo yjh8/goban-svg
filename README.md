@@ -72,19 +72,22 @@ and SGF an export.
 
 ## Gallery
 
-The three example boards, extracted from real app screenshots (left: input screenshot,
-committed in `examples/`; right: the SVG this tool produced from it):
+The four example boards, extracted from real screenshots of two different Go apps
+(left: input screenshot, committed in `examples/`; right: the SVG this tool produced
+from it):
 
 | Input | Output |
 |---|---|
 | ![board-1 screenshot](examples/board-1.png) | ![board-1 SVG](examples/board-1.svg) |
 | ![board-2 screenshot](examples/board-2.png) | ![board-2 SVG](examples/board-2.svg) |
 | ![board-3 screenshot](examples/board-3.png) | ![board-3 SVG](examples/board-3.svg) |
+| ![board-4 screenshot](examples/board-4.png) | ![board-4 SVG](examples/board-4.svg) |
 
-Every feature the app draws survives the trip: numbered move labels (①②③), the colored
+Every feature the apps draw survives the trip: numbered move labels (①②③), the colored
 corner "wedge" badges (recorded as triangle marks in the badge's color), and solid square
-markers on empty points. `examples/*.json` are the verified extractions — they double as
-the extractor's regression fixtures (`tests/test_real_examples.py`).
+markers on empty points. `examples/*.json` are the verified extractions — boards 1–3
+verified stone-by-stone by hand, board-4 via a class-ring overlay diff — and they double
+as the extractor's regression fixtures (`tests/test_real_examples.py`).
 
 ## Development
 
@@ -118,7 +121,9 @@ contracts), `docs/build-learnings.md` (what went wrong and why, worth reading fi
 | `screenshots/` | **gitignored** | Raw input inbox for board screenshots (curated copies go to `examples/`) |
 | `outputs/` | **gitignored** | Transient artifacts (previews, spike logs) |
 | `web/` | tracked | The zh-TW web app (static; Pyodide runs the package in-browser) → goban-svg.pages.dev |
-| `scripts/` | tracked | `deploy-web.sh` — deterministic build + stage + Cloudflare Pages deploy |
+| `web/assets/` | tracked | Static images the app serves (corner-placement 正確／錯誤 guidance photos for photo mode) |
+| `web/wheels/` | tracked | Immutable published-wheel archive: every wheel ever deployed, byte-for-byte, + `SHA256SUMS` (deploy refuses to replace published bytes; smoke re-verifies each URL) |
+| `scripts/` | tracked | `deploy-web.sh` — deterministic build + stage + Cloudflare Pages deploy; `smoke-web.sh` — post-deploy assertions (headers, runtime, published-wheel hashes) |
 | `web-dist/` | **gitignored** | Deploy staging built by `scripts/deploy-web.sh` (wheel + self-hosted Pyodide) |
 | `session_logs/` | tracked | Per-session provenance logs + changelog archives (fleet doc lifecycle) |
 | `session_handoff/` | tracked | Starter-prompt handoffs for the next session (fleet doc lifecycle) |

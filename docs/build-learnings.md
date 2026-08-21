@@ -3,6 +3,42 @@
 > What actually went wrong (failure modes, not just fixes), so the next session doesn't
 > rediscover them. Newest first.
 
+## Author CSS silently defeats [hidden] (2026-08-21)
+
+`button, .btn { display: inline-block }` — an ordinary author rule — beats the
+UA's `[hidden] { display: none }` (author origin wins over UA origin), so every
+`hidden` `<button>` on the page rendered anyway: the point inspector showed
+確認目前判讀/移除記號 on every point, and two photo entry buttons leaked at
+load. Caught only by a verify lens running a live Chrome probe
+(`{hidden:true, rects:1}` is the tell). Fix: a global `[hidden]{display:none}`
+kept LAST in the stylesheet (ID-specificity overrides stay deliberate).
+Rule: any stylesheet that sets `display` on element/class selectors needs the
+global `[hidden]` reset — and "it has the hidden attribute" is not evidence of
+invisibility; probe `getClientRects()`.
+
+## Two review-REJECT rounds changed the architecture, not the prose (2026-08-21)
+
+The editor/photo-UX design took two Codex ultra REJECT rounds (4+4 BLOCKERs).
+The keepers: (1) the reviewer MEASURED Pyodide phases (classify ≈ 0.1 s vs
+rectify ≈ 2.5 s) and inverted the two-step design into "preview runs the whole
+extraction, commit is free" — a better architecture no amount of prose review
+would have found; (2) it caught that a redeploy had ALREADY silently replaced
+the published 0.1.0 wheel bytes the integration prompt pins (D-008 exists
+because of this); (3) cycling-to-empty would have destroyed board-4's own
+K8 square — the counterexample was sitting in our fixtures. Reviews that only
+bless prose are cheap; reviews that run measurements against the actual tree
+are the ones worth 30 minutes.
+
+## Browser-automation taps race smooth scrolling (2026-08-21)
+
+Synthetic corner taps computed client coordinates from `getBoundingClientRect()`
+while `openPicker`'s `scrollIntoView({behavior:"smooth"})` was still animating —
+every tap landed ~500 px off and the quad went concave, with no error anywhere
+(the click handler's guard just returned). Also: a status line read ~400 ms
+after a rAF-coalesced redraw can still show the PREVIOUS draw's text. When
+driving pages by synthetic events: wait for scroll to settle before measuring
+rects, and verify state visually (screenshot), not by reading UI text mid-frame.
+
 ## Web arc (2026-08-19c): port the workflow, not just the function
 
 Both Codex reviews of the web app converged on one lesson. The design review's

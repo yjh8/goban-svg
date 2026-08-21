@@ -106,17 +106,147 @@ figcaption { font-size: .82rem; color: #6b5c46; text-align: center; margin-top: 
   padding: .5rem 1rem; margin-bottom: .8rem; font-weight: 600;
 }
 
+/* ---------------------------------------------- §A corner-placement guidance */
+
+.monitor-hint {
+  background: #eef4fb; border: 1px solid #b6c9e0; border-radius: var(--radius);
+  padding: .45rem .8rem; margin: .4rem 0 0;
+}
+.corner-examples { display: flex; gap: .8rem; margin: .6rem 0 .2rem; flex-wrap: wrap; }
+.corner-example { margin: 0; flex: 1 1 16rem; min-width: 0; }
+.corner-example img {
+  width: 100%; height: auto; border-radius: 8px; border: 3px solid #c9b48a; background: #fff;
+}
+.corner-example.good img { border-color: #2b8a3e; }
+.corner-example.bad img { border-color: #c92a2a; }
+.corner-example figcaption { font-size: .84rem; font-weight: 600; margin-top: .3rem; text-align: left; }
+.corner-example.good figcaption { color: #216a30; }
+.corner-example.bad figcaption { color: #a12a1e; }
+.corner-example .glyph { font-size: 1.05rem; }
+
+/* ------------------------------------------- §B rectified-grid checkpoint */
+
+#checkpoint-wrap { overflow: auto; border-radius: 8px; }
+#checkpoint-canvas {
+  display: block; width: 100%; max-width: 34rem; height: auto; margin: 0 auto;
+  border-radius: 8px; background: #fff; box-shadow: 0 2px 10px rgba(60,40,10,.15);
+}
+.checkpoint-controls { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .8rem; }
+#checkpoint-accept { font-weight: 700; }
+.refine-status {
+  border-radius: var(--radius); padding: .45rem .8rem; margin: .4rem 0; font-size: .92rem;
+}
+.refine-status.ok { background: #e9f6ec; border: 1px solid #2b8a3e; color: #1f6b30; }
+.refine-status.warn { background: #fff1cc; border: 1px solid #d8a53a; color: #7a5310; }
+
+/* --------------------------------------------------- §C correction editor */
+
+.board-toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
+.btn.small { padding: .35rem .7rem; font-size: .9rem; }
+.thumb-btn {
+  display: inline-flex; align-items: center; gap: .45rem; padding: .25rem .6rem .25rem .25rem;
+  background: var(--panel); color: var(--ink); border: 1px solid #c9b48a; font-size: .9rem;
+}
+.thumb-btn img { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; background: #eee; }
+.dirty-badge {
+  background: #fff1cc; border: 1px solid #d8a53a; color: #7a5310;
+  border-radius: var(--radius); padding: .3rem .7rem; font-size: .85rem; font-weight: 600;
+}
+
+#board-zoom { overflow: auto; -webkit-overflow-scrolling: touch; }
+#board-zoom.zoomed { max-height: 70vh; }
+/* #board-wrap carries the zoom width and is the positioned ancestor for every
+   percentage overlay (chips, inspector). #board-grid is a transparent cover
+   layer that owns ONLY grid semantics (row/gridcell) so the ARIA grid contract
+   holds; the inspector dialog lives OUTSIDE it, so its keystrokes never bubble
+   into the grid's keyboard handler (verify lenses, 2026-08-21). */
+#board-wrap { position: relative; width: calc(100% * var(--edit-zoom, 1)); }
+#board-wrap.frozen { opacity: .82; }
+#board-grid { position: absolute; inset: 0; }
+#board-grid:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#svg-holder { position: relative; }
+/* display:block matters: an inline <svg> leaves a text-descender gap under it,
+   which would make #board-grid taller than the board and skew every percentage
+   the ring/chip/cursor overlay is positioned with. */
+#svg-holder svg { display: block; }
+#board-overlay { position: absolute; inset: 0; pointer-events: none; }
+
+/* Pointer-INERT badge (r5 M3): an interactive 44px chip half a cell off-point
+   covers the intersection once cells drop under ~31 CSS px. Removal happens in
+   the point inspector (clicking a marked point opens it). */
+.mark-chip {
+  position: absolute; width: 22px; height: 22px; min-height: 0; padding: 0;
+  transform: translate(-50%, -50%); pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--danger);
+  background: rgba(255,255,255,.92); color: var(--danger); font-size: .8rem; line-height: 1;
+}
+
+#cursor-cell {
+  position: absolute; transform: translate(-50%, -50%); aspect-ratio: 1 / 1;
+  border: 3px solid var(--accent); border-radius: 50%; pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.7);
+}
+#board-grid:focus-visible #cursor-cell, #board-grid:focus #cursor-cell {
+  border-color: #1a5fb4; box-shadow: 0 0 0 3px rgba(255,255,255,.85);
+}
+
+#inspector {
+  position: absolute; z-index: 5; width: min(19rem, 88%); transform: translate(-50%, 0);
+  background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(60,40,10,.28); padding: .6rem .7rem; text-align: left;
+}
+.inspector-title { margin: 0 0 .2rem; font-weight: 700; }
+.inspector-reason { margin: 0 0 .5rem; font-size: .85rem; color: #6b5c46; }
+.inspector-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+.inspector-actions button[aria-pressed="true"] { background: var(--wood); border-color: var(--accent); font-weight: 700; }
+
+.coord-form { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .8rem 0; }
+.coord-form label { font-weight: 600; }
+.coord-form input {
+  min-height: 44px; width: 7rem; font-size: 1rem; padding: 0 .6rem;
+  border: 1px solid #c9b48a; border-radius: 8px; background: var(--panel); color: var(--ink);
+}
+.coord-form .hint { flex-basis: 100%; margin: 0; }
+
+#warnings-list li.resolved { color: #4f6b52; text-decoration: line-through; }
+#warnings-list li.resolved .review-tag { text-decoration: none; }
+.review-tag { font-size: .82rem; color: #4f6b52; margin-left: .3rem; text-decoration: none; }
+.review-tag.geometry { color: #7a5310; }
+#review-note { margin: .2rem 0 .4rem; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+#dropzone.busy { cursor: progress; opacity: .7; }
+
 footer { margin-top: 2rem; font-size: .84rem; color: #6b5c46; border-top: 1px solid #e3d5b8; padding-top: .8rem; }
 
 @media (max-width: 44rem) {
   .view-toggle { display: flex; }
   #compare .pane { flex-basis: 100%; }
   .pane[hidden] { display: none; }
+  /* stacked, never side-by-side, so each example stays readable (review F14) */
+  .corner-examples { flex-direction: column; }
+  .corner-example { flex-basis: auto; }
 }
 @media (min-width: 44.01rem) {
   /* desktop: always show BOTH panes side by side regardless of the mobile tab
      state — a resize/rotation must not strand one pane hidden (review m2) */
   #pane-original[hidden], #pane-diagram[hidden] { display: block; }
+  /* the source image already has its own pane here, so the thumbnail shortcut
+     (which exists for the mobile tab layout) would be redundant */
+  .thumb-btn { display: none; }
 }
 .file-btn:focus-within, #dropzone:focus-within { outline: 3px solid var(--accent); }
 details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+
+/* [hidden] must actually hide. The button/.btn/.thumb-btn display rules above are
+   AUTHOR declarations, and author origin beats the UA's [hidden]{display:none} —
+   without this rule every hidden <button> on the page still renders (verify lens,
+   2026-08-21). Kept LAST so it wins its specificity ties; the desktop
+   #pane-*[hidden]{display:block} override above still wins via ID specificity,
+   which is deliberate (review m2). */
+[hidden] { display: none; }

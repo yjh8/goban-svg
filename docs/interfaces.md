@@ -220,15 +220,32 @@ class GridFit:
     bbox: tuple[int, int, int, int]  # x0, y0, x1, y1 wood bbox (inclusive)
 
 
+@dataclass(frozen=True)
+class UncertainPoint:
+    point: Point
+    kind: str  # "ambiguous-color" | "unreadable-label" (extract.py);
+    # "ambiguous" | "warm-bright" | "off-image" | "no-reference" (photo.py)
+
+
 @dataclass
 class ExtractionResult:
     position: Position
     grid: GridFit
     warnings: list[str]
+    uncertain: list[UncertainPoint] = field(default_factory=list)  # 0.1.1
 
 
 def extract_position(img: Image) -> ExtractionResult: ...
 ```
+
+`uncertain` (added 0.1.1) is the point-addressed mirror of the point-naming `warnings`: one entry
+per such warning, same scan order, no duplicate `(point, kind)`. It is APPENDED with a default, so
+the three-positional-argument construction stays valid; old pickles are unsupported (none exist —
+the wheel is used in-process only). Warnings that name no point (board size, grid anisotropy, crop
+margin, photo refinement fallback) get no entry, and **absence of an entry is not a confidence
+claim** — see photo-mode-design.md finding #2, where nine white stones were misread silently. The
+warning STRINGS are frozen byte for byte (callers regex-parse them); `uncertain` rides alongside
+them and never replaces them.
 
 Grid orientation note: `ys[0]` is the TOP image row, which is board row `size`; convert with
 `row = size - y_index` when building Points (same convention as `Point.sgf`).
@@ -265,12 +282,27 @@ def refine_corners(img: Image, corners: Sequence[Corner], size: int) -> tuple[tu
 # caller's corners with converged=False (skipped silently for size < 5)
 
 
+@dataclass(frozen=True)
+class PhotoArtifact:
+    result: ExtractionResult
+    canonical: Image  # the rectified image the classifier ACTUALLY read (same object)
+    refined: bool  # did auto-refinement verifiably converge?
+    corners_used: tuple[Corner, ...]  # the corners the rectification ran on
+
+
+def extract_photo_artifact(
+    img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True
+) -> PhotoArtifact: ...
+
+
 def extract_photo_position(
     img: Image, corners: Sequence[Corner], size: int, *, refine: bool = True
 ) -> ExtractionResult: ...
 
 
-# refine=True (default) runs refine_corners first and warns when it fell back
+# refine=True (default) runs refine_corners first and warns when it fell back;
+# extract_photo_position is a thin wrapper returning extract_photo_artifact(...).result
+# (0.1.1) — same signature, same warnings, same result
 
 
 # stones only (photos carry no labels/marks); GridFit coordinates live in the RECTIFIED
@@ -281,3 +313,10 @@ def extract_photo_position(
 GridFit note (generalized): `xs`/`ys`/`bbox` are in the *classified image plane* — the
 input screenshot for `extract_position`, the rectified canonical image for
 `extract_photo_position`.
+
+Single-pass rule (webapp-design.md v3 amendment 2): one call to `extract_photo_artifact`
+performs exactly ONE classification rectification, and `canonical` is that image itself,
+not a copy or a re-derivation — the caller (the web checkpoint) draws its grid overlay on
+the very pixels the stones were read from. Rectification measures ~2.5 s against ~0.1 s for
+classification, so a second pass would more than double the wait. A regression test counts
+`_rectify_masked` calls.

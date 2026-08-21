@@ -20,6 +20,7 @@ from goban_svg.board import Point, Position
 from goban_svg.extract import ExtractionError
 from goban_svg.photo import (
     MIN_CELL_SCALE_PX,
+    extract_photo_artifact,
     extract_photo_position,
     rectify_board,
     validate_corners,
@@ -702,3 +703,210 @@ def test_refine_min_size_boundary(monkeypatch):
         quad = ((float(lo), float(lo)), (float(hi), float(lo)), (float(hi), float(hi)), (float(lo), float(hi)))
         P.extract_photo_position(flat, quad, size=size)
     assert calls == [5]  # 4 never attempted; 5 attempted
+
+
+# --------------------------------------------------------------------------- #
+# Single-pass artifact API (v3 amendment 2, R2-F2)
+# --------------------------------------------------------------------------- #
+
+
+def _counting_rectifier(monkeypatch):
+    """Wrap photo._rectify_masked so every call is recorded; returns the log.
+
+    Each entry is (corners, canonical) -- the corners the pass ran on and the
+    exact image object it produced, which is what lets the identity assertion
+    below prove the classifier read the artifact's own image rather than an
+    equal-looking second rectification.
+    """
+    import goban_svg.photo as P
+
+    real = P._rectify_masked
+    log: list[tuple[tuple, Image]] = []
+
+    def counting(img, corners, size, cell):
+        out = real(img, corners, size, cell)
+        log.append((tuple(corners), out[0]))
+        return out
+
+    monkeypatch.setattr(P, "_rectify_masked", counting)
+    return log
+
+
+def test_artifact_rectifies_exactly_once(monkeypatch):
+    # R2-F2: rectification measured at ~2.5s against ~0.1s for classification
+    # (design review F7), so a second pass would more than double the wait.
+    import goban_svg.photo as P
+
+    pos = _stones_9()
+    photo = _make_photo(pos, QUAD, 660, 520)
+    log = _counting_rectifier(monkeypatch)
+    artifact = P.extract_photo_artifact(photo, QUAD, size=9, refine=False)
+    assert len(log) == 1, "one extraction must rectify exactly once"
+    assert artifact.canonical is log[0][1], "the classifier must read the artifact's OWN canonical image"
+    assert artifact.corners_used == log[0][0] == tuple(QUAD)
+    assert artifact.refined is False
+    assert artifact.result.position.stones == pos.stones
+
+
+def test_artifact_rectifies_once_when_refinement_is_skipped(monkeypatch):
+    # refine=True on a board too small to refine (< _REFINE_MIN_SIZE): the
+    # default path, and still exactly one rectification.
+    import goban_svg.photo as P
+
+    pos = Position(size=4, stones={Point(2, 2): "black", Point(3, 3): "white"})
+    flat = render_png(pos, cell=24)
+    lo, hi = _painted_outer_rect(4, 24)
+    quad = ((float(lo), float(lo)), (float(hi), float(lo)), (float(hi), float(hi)), (float(lo), float(hi)))
+    log = _counting_rectifier(monkeypatch)
+    artifact = P.extract_photo_artifact(flat, quad, size=4)
+    assert len(log) == 1
+    assert artifact.canonical is log[0][1]
+    assert artifact.refined is False
+
+
+def test_refined_run_classifies_the_last_rectification(monkeypatch):
+    # With refinement on, the passes legitimately rectify -- but the FINAL
+    # rectification is the classifier's, and it runs on the refined corners the
+    # artifact reports. (The pass count itself is refinement's business.)
+    import goban_svg.photo as P
+
+    pos = _stones_9()
+    photo = _make_photo(pos, QUAD, 660, 520)
+    real_refine = P._refine_once
+    passes = {"n": 0}
+
+    def spy(*args):
+        passes["n"] += 1
+        return real_refine(*args)
+
+    monkeypatch.setattr(P, "_refine_once", spy)
+    log = _counting_rectifier(monkeypatch)
+    artifact = P.extract_photo_artifact(photo, QUAD, size=9, refine=True)
+    assert artifact.canonical is log[-1][1]
+    assert artifact.corners_used == log[-1][0]
+    assert len(artifact.corners_used) == 4
+    # Each refinement pass rectifies once, and then classification rectifies
+    # ONCE -- no extra pass hides in the refined path either.
+    assert passes["n"] >= 1
+    assert len(log) == passes["n"] + 1
+
+
+def test_extract_photo_position_is_the_artifact_wrapper():
+    # The 0.1.0 entry point keeps its signature and its exact output.
+    pos = _stones_9()
+    photo = _make_photo(pos, QUAD, 660, 520)
+    artifact = extract_photo_artifact(photo, QUAD, size=9)
+    result = extract_photo_position(photo, QUAD, size=9)
+    assert result.position.stones == artifact.result.position.stones
+    assert result.warnings == artifact.result.warnings
+    assert result.uncertain == artifact.result.uncertain
+    assert result.grid.xs == artifact.result.grid.xs
+
+
+# --------------------------------------------------------------------------- #
+# Structured uncertainty (webapp-design.md v2 payload item 2 / v3)
+# --------------------------------------------------------------------------- #
+
+
+def _flat_board_photo(size: int = 9, cell: int = 24):
+    """A rendered flat board used directly as the "photo", with its outer
+    intersections as the corner quad -- so canonical and photo pixels line up 1:1
+    (render cell == PHOTO_CELL) and a blob can be painted at a known point."""
+    flat = render_png(Position(size=size), cell=cell)
+    lo, hi = _painted_outer_rect(size, cell)
+    quad = ((float(lo), float(lo)), (float(hi), float(lo)), (float(hi), float(hi)), (float(lo), float(hi)))
+    return flat, quad, lo
+
+
+def _blob(img: Image, cx: float, cy: float, radius: float, rgb):
+    for y in range(int(cy - radius), int(cy + radius) + 1):
+        for x in range(int(cx - radius), int(cx + radius) + 1):
+            if (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius:
+                img.set(x, y, rgb)
+
+
+def test_photo_uncertain_mirrors_the_point_warnings_verbatim():
+    """One synthetic case per classifier/reference kind, warnings frozen.
+
+    Painted against the default wood (231,196,122), luminance 198:
+    C8 -- a bright but still WARM disc (dL +30, warmth 105 vs wood's 109): the
+    glare case the neutrality margin exists for.
+    A6/A5 -- one cell-center wood reference blacked out. Both are edge points with
+    exactly TWO references, so the survivor and the ruined one sit 73 apart from
+    their own median and BOTH fail the outlier gate: no trustworthy baseline.
+    G3 -- a disc 20 darker than its wood: past the empty band, short of the black
+    floor, i.e. genuinely undecidable.
+    """
+    photo, quad, lo = _flat_board_photo()
+    _blob(photo, lo + 2 * 24, lo + 1 * 24, 9, (255, 230, 150))  # C8: warm-bright
+    _blob(photo, lo + 6 * 24, lo + 6 * 24, 9, (208, 176, 110))  # G3: ambiguous
+    _blob(photo, lo + 12, lo + 3 * 24 + 12, 6, (60, 50, 40))  # A6/A5: no-reference
+
+    result = extract_photo_position(photo, quad, size=9, refine=False)
+
+    assert result.warnings == [
+        "bright point at C8 is as warm as the surrounding wood -- glare or a pale marking? "
+        "left empty; check it by hand",
+        "no reliable wood reference around A6 (shadow or stone bleed?) -- left empty; check it by hand",
+        "no reliable wood reference around A5 (shadow or stone bleed?) -- left empty; check it by hand",
+        "ambiguous point at G3 (contrast -20 against its local wood) -- left empty; check it by hand",
+    ]
+    assert [(u.point.notation(), u.kind) for u in result.uncertain] == [
+        ("C8", "warm-bright"),
+        ("A6", "no-reference"),
+        ("A5", "no-reference"),
+        ("G3", "ambiguous"),
+    ]
+    # Pairing, index by index, in the classifier's own scan order (top row first).
+    for entry, warning in zip(result.uncertain, result.warnings, strict=True):
+        assert entry.point.notation() in warning
+    assert result.position.stones == {}  # every doubtful point was left empty
+
+
+def test_photo_uncertain_survives_refinement():
+    photo, quad, lo = _flat_board_photo()
+    _blob(photo, lo + 6 * 24, lo + 6 * 24, 9, (208, 176, 110))
+    with_refine = extract_photo_position(photo, quad, size=9, refine=True)
+    without = extract_photo_position(photo, quad, size=9, refine=False)
+    assert [(u.point.notation(), u.kind) for u in with_refine.uncertain] == [("G3", "ambiguous")]
+    assert with_refine.uncertain == without.uncertain
+
+
+def test_off_image_points_are_reported_and_the_grid_warning_is_not():
+    # The board cropped exactly at its outer lines: each corner point has three
+    # quarters of its disc outside the photo. The refinement-fallback warning
+    # names no point, so it must NOT produce an entry (v2 review F4: geometry
+    # kinds are listed, not ringed as stone-actionable).
+    pos = Position(size=9)
+    flat = render_png(pos, cell=24)
+    lo, hi = _painted_outer_rect(9, 24)
+    crop = Image.new(hi - lo + 1, hi - lo + 1)
+    for y in range(lo, hi + 1):
+        for x in range(lo, hi + 1):
+            crop.set(x - lo, y - lo, flat.get(x, y))
+    side = crop.width - 1.0
+    quad = ((0.0, 0.0), (side, 0.0), (side, side), (0.0, side))
+
+    result = extract_photo_position(crop, quad, size=9, refine=True)
+
+    assert result.warnings[:4] == [
+        "point A9 lies (partly) outside the photo -- left empty; check it by hand",
+        "point J9 lies (partly) outside the photo -- left empty; check it by hand",
+        "point A1 lies (partly) outside the photo -- left empty; check it by hand",
+        "point J1 lies (partly) outside the photo -- left empty; check it by hand",
+    ]
+    assert result.warnings[4].startswith("corner auto-refinement could not verify the grid")
+    assert len(result.warnings) == 5
+    assert [(u.point.notation(), u.kind) for u in result.uncertain] == [
+        ("A9", "off-image"),
+        ("J9", "off-image"),
+        ("A1", "off-image"),
+        ("J1", "off-image"),
+    ]
+
+
+def test_clean_photo_has_no_uncertain_entries():
+    photo = _make_photo(_stones_9(), QUAD, 660, 520)
+    result = extract_photo_position(photo, QUAD, size=9)
+    assert result.warnings == []
+    assert result.uncertain == []

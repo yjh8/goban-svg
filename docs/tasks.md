@@ -7,11 +7,13 @@
    (photo-mode-design.md) + `examples/board-4` fixture (the same program's true
    screenshot extracts perfectly). Joseph is now collecting REAL physical-board photos
    from staff — that corpus unblocks the H1–H3 calibration hypotheses.
-2. **Correction editor + photo-confidence UX trio** — design written
-   (webapp-design.md § 2026-08-21): corner-placement guidance, rectified-grid
-   confirmation step, click-to-cycle editor + `geom`/`uncertain` payloads. Codex
-   ultra design review in flight; implement after findings are addressed, then
-   code-review cascade + redeploy.
+2. **Correction editor + photo-confidence UX trio (D-007)** — IMPLEMENTED +
+   locally E2E-verified. Design survived two Codex ultra REJECT rounds (25
+   findings folded into the v3 contract); build ran as a 5-agent workflow with
+   two independent verify lenses (2 MAJOR + 12 MINOR, all fixed). Ships as
+   0.1.1 with the D-008 immutable wheel archive. Remaining: Codex ultra code
+   cascade (in flight) → address findings → commit+push → deploy → post-deploy
+   smoke + live E2E.
 
 ## Backlog
 

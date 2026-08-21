@@ -22,7 +22,7 @@ from goban_svg.photo import extract_photo_position
 from goban_svg.png_codec import load_image
 from goban_svg.render import render_png, render_svg
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "__version__",

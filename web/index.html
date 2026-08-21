@@ -22,19 +22,34 @@
     </label>
     <button id="convert-btn" disabled>轉換成棋譜圖</button>
     <p class="photo-mode-link"><button id="photo-mode-link" class="linklike" hidden>實體棋盤照片？改用照片模式（實驗性）</button></p>
+    <p id="monitor-hint-upload" class="hint monitor-hint" hidden>要辨識螢幕上的棋盤？請直接截圖，再使用自動辨識；效果會比拍攝螢幕好很多。</p>
     <p id="status" role="status" aria-live="polite"></p>
     <div id="error-box" role="alert" hidden>
       <p id="error-main"></p>
       <p><button id="photo-fallback-btn" class="btn" hidden>看起來是實體棋盤照片？點四個角試試（實驗性）</button></p>
+      <p id="monitor-hint-error" class="hint monitor-hint" hidden>要辨識螢幕上的棋盤？請直接截圖，再使用自動辨識；效果會比拍攝螢幕好很多。</p>
       <details><summary>技術詳情</summary><pre id="error-detail"></pre></details>
     </div>
   </section>
 
   <section id="picker-section" aria-label="照片模式：點選棋盤角點" hidden>
     <h2>照片模式（實驗性）</h2>
-    <p class="hint">請依序拖曳 <strong>1–4 號控制點</strong>到棋盤四個角的<strong>交叉點</strong>
-      （1 左上 → 2 右上 → 3 右下 → 4 左下）。大致準確即可 — 系統會依格線自動微調。
+    <p class="hint" id="picker-guide">請依序把 <strong>1–4 號控制點</strong>放到棋盤四個角
+      （1 左上 → 2 右上 → 3 右下 → 4 左下）。<br>
+      把控制點放在<strong>最外圈格線的交叉點</strong>上 — 左上角＝最上方橫線與最左方直線的交點。
+      <strong>不要</strong>放在木框邊緣、視窗外框或座標數字上。<br>
       照片模式只辨識<strong>棋子</strong>（實體棋盤沒有手數與記號）。</p>
+    <div class="corner-examples">
+      <figure class="corner-example good">
+        <img src="assets/corner-correct.png" alt="正確示範：控制點正好落在最外圈橫線與直線的交叉點上，位於棋盤格線之內。">
+        <figcaption><span class="glyph" aria-hidden="true">✓</span> 正確：放在最外圈格線的交叉點</figcaption>
+      </figure>
+      <figure class="corner-example bad">
+        <img src="assets/corner-wrong.png" alt="錯誤示範：控制點放到了棋盤木框邊緣，落在最外圈格線之外。">
+        <figcaption><span class="glyph" aria-hidden="true">✗</span> 錯誤：放在木框、外框或座標數字上</figcaption>
+      </figure>
+    </div>
+    <p id="monitor-hint-picker" class="hint monitor-hint">要辨識螢幕上的棋盤？請直接截圖，再使用自動辨識；效果會比拍攝螢幕好很多。</p>
     <div id="picker-wrap"><canvas id="picker-canvas" tabindex="0" aria-label="棋盤角點選取畫布：方向鍵微調選取的控制點，Shift 加速"></canvas></div>
     <div class="handle-select" role="group" aria-label="選擇控制點（點畫布可直接放置）">
       <button aria-pressed="true">1 左上</button>
@@ -50,16 +65,34 @@
           <option value="9">9 路</option>
         </select>
       </label>
-      <button id="photo-convert-btn" class="btn">依角點轉換</button>
+      <button id="photo-convert-btn" class="btn">依角點辨識 → 先確認格線</button>
       <button id="picker-cancel-btn" class="btn secondary">返回</button>
     </div>
     <p id="picker-status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="checkpoint-section" aria-label="照片模式：確認格線是否對齊" hidden>
+    <h2>確認格線</h2>
+    <p class="hint">下圖是系統實際辨識用的<strong>拉正棋盤</strong>，紅線是它認定的格線。
+      請確認紅線是否落在棋盤的格線上、交叉點是否對準棋子中心。</p>
+    <p id="checkpoint-refine" class="refine-status"></p>
+    <div id="checkpoint-wrap"><canvas id="checkpoint-canvas" aria-label="拉正後的棋盤與系統判定的格線"></canvas></div>
+    <div class="checkpoint-controls">
+      <button id="checkpoint-accept" class="btn">格線有對齊 → 顯示結果</button>
+      <button id="checkpoint-retry" class="btn secondary">沒對齊 → 重新點角</button>
+    </div>
+    <p id="checkpoint-status" role="status" aria-live="polite"></p>
   </section>
 
   <section id="result-section" aria-label="辨識結果" hidden>
     <h2>辨識結果</h2>
     <p id="experimental-banner" hidden>照片模式為實驗性功能，請務必逐子核對盤面。</p>
     <p id="summary"></p>
+    <p id="refined-line" class="refine-status" hidden></p>
+    <!-- Outside #warnings-box on purpose: finding #2 measured nine misread whites
+         with NO warning at all, so this honesty line matters MOST when the
+         warnings list is empty (verify lens, 2026-08-21). -->
+    <p id="review-note" class="hint">沒有圈記的點也可能有誤 — 請整體對照原圖。</p>
 
     <div id="warnings-box" hidden>
       <h3>請人工確認</h3>
@@ -77,10 +110,55 @@
         <figcaption>原圖</figcaption>
       </figure>
       <figure id="pane-diagram" class="pane" role="tabpanel" aria-labelledby="tab-diagram">
-        <div id="svg-holder"></div>
-        <figcaption>棋譜圖（含座標，供對照確認）</figcaption>
+        <div class="board-toolbar">
+          <button id="thumb-btn" class="thumb-btn" aria-label="查看原圖"><img id="thumb-img" alt=""><span>查看原圖</span></button>
+          <button id="edit-zoom-btn" class="btn secondary small" aria-pressed="false">放大編輯</button>
+          <button id="undo-btn" class="btn secondary small" disabled>復原</button>
+          <span id="dirty-badge" class="dirty-badge" hidden>JSON 已修改，尚未套用</span>
+        </div>
+        <div id="board-zoom">
+          <!-- #board-wrap: positioned ancestor + zoom-width carrier. The grid is a
+               transparent cover layer owning ONLY row/gridcell children (ARIA grid
+               contract); chips render above it, the inspector dialog is a SIBLING
+               so its keys never bubble into the grid handler. -->
+          <div id="board-wrap">
+            <div id="svg-holder"></div>
+            <div id="board-grid" role="grid" tabindex="0"
+                 aria-label="棋譜編輯盤面：方向鍵移動游標，Home／End 移到該列兩端，Enter 或空白鍵開啟該點的判讀選單，Ctrl 或 ⌘ + Z 復原">
+              <div id="cursor-row" role="row"><span id="cursor-cell" role="gridcell"></span></div>
+            </div>
+            <div id="board-overlay"></div>
+            <div id="inspector" role="dialog" aria-labelledby="inspector-title" hidden>
+              <p id="inspector-title" class="inspector-title"></p>
+              <p id="inspector-reason" class="inspector-reason"></p>
+              <div class="inspector-actions" role="group" aria-label="設定這個點">
+                <button id="inspector-empty" class="btn secondary small">空</button>
+                <button id="inspector-black" class="btn secondary small">黑</button>
+                <button id="inspector-white" class="btn secondary small">白</button>
+              </div>
+              <div class="inspector-actions">
+                <button id="inspector-confirm" class="btn secondary small">確認目前判讀</button>
+                <button id="inspector-unmark" class="btn secondary small" hidden>移除記號</button>
+                <button id="inspector-close" class="btn secondary small">關閉</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption>棋譜圖（含座標）— 點一下交叉點即可修正：空 → 黑 → 白 → 空；有圈記或記號的點會先開啟選單。</figcaption>
       </figure>
     </div>
+
+    <div class="coord-form">
+      <label for="coord-input">用座標修正</label>
+      <input id="coord-input" type="text" inputmode="text" autocomplete="off" spellcheck="false"
+             placeholder="例如 K8" aria-describedby="coord-help">
+      <button id="coord-empty" class="btn secondary small">設為空</button>
+      <button id="coord-black" class="btn secondary small">設為黑</button>
+      <button id="coord-white" class="btn secondary small">設為白</button>
+      <span id="coord-help" class="hint">直行由 A 起算（略過 I），橫列由下往上數。</span>
+    </div>
+    <p id="board-live-cursor" class="sr-only" aria-live="polite"></p>
+    <p id="board-live-mutation" class="sr-only" aria-live="polite"></p>
 
     <div id="downloads">
       <a id="dl-svg" class="btn" download="goban-board.svg">下載 SVG 棋譜圖</a>
@@ -91,18 +169,19 @@
     <details id="editor-details">
       <summary>修正辨識結果（編輯 JSON 後重新產生）</summary>
       <p class="hint">若辨識有誤（例如手數讀錯、棋子顏色錯誤），可直接修改下方 JSON —
-        棋子座標格式如 <code>"D14"</code>（直行 A–T 略過 I，橫列由下往上數）— 然後按「套用修正並重新產生」。</p>
+        棋子座標格式如 <code>"D14"</code>（直行由 A 起算、略過 I，橫列由下往上數）— 然後按「套用修正並重新產生」。
+        <strong>編輯 JSON 期間，上方棋盤的點按修正會暫停</strong>，套用成功後恢復。</p>
       <textarea id="json-editor" rows="14" spellcheck="false" aria-label="盤面 JSON 編輯器"></textarea>
       <div class="editor-actions">
         <label class="btn file-btn">匯入 JSON 檔<input type="file" id="json-import" accept=".json,application/json"></label>
-        <button id="rerender-btn" class="btn">套用修正並重新產生</button>
+        <button id="rerender-btn" class="btn" disabled>套用修正並重新產生</button>
       </div>
     </details>
   </section>
 
   <footer>
     <p>圖片僅在您的瀏覽器中處理，<strong>不會上傳到任何伺服器</strong>。</p>
-    <p>辨識有誤？轉換後可在<a href="#editor-details">「修正辨識結果」</a>直接編輯 JSON 重新產生。</p>
+    <p>辨識有誤？可直接在棋譜圖上點交叉點修正，或在<a href="#editor-details">「修正辨識結果」</a>編輯 JSON 重新產生。</p>
     <p id="version-line"></p>
   </footer>
 </main>

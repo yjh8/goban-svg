@@ -2,6 +2,67 @@
 
 > Temporal decision log. Newest first. Minor decisions are single bullets.
 
+## D-008 — Published wheel URLs are immutable; tracked archive + manifest (2026-08-21)
+
+**Status:** ACTIVE
+**Valid from:** 2026-08-21
+
+### Context
+The round-2 design review flagged that redeploys rebuild the wheel and overwrite
+`/wheels/goban_svg-<ver>-*.whl` in place — and measurement showed it had ALREADY
+happened: the live 0.1.0 wheel serves sha256 `02b158f7…` while the blindspot
+integration prompt pins `5964bad5…` (the original bytes are gone; blindspot is
+unaffected in practice because its deployment vendors our module sources, but the
+published contract was silently broken).
+
+### Decision
+1. `web/wheels/` is a **tracked immutable archive**: every published wheel's exact
+   bytes + a `SHA256SUMS` manifest (supersedes webapp-design amendment 10's
+   "wheels are never committed"). Seeded 2026-08-21 with the live 0.1.0 bytes.
+2. `deploy-web.sh` verifies the archive pre-stage, hard-fails on any
+   same-filename/different-bytes collision, archives new versions with a loud
+   commit-both note, and stages the WHOLE archive; `smoke-web.sh` re-downloads and
+   hash-verifies every manifest wheel post-deploy.
+3. Any change to the package's public surface ships as a NEW version (0.1.1 for
+   `ExtractionResult.uncertain` + `PhotoArtifact`). Version bumps land in
+   pyproject.toml + `__init__.py` + uv.lock together.
+4. The integration prompt's pinned hash is corrected with a dated note; Joseph
+   notifies the blindspot author (their copy is stale).
+
+## D-007 — Correction editor + staged photo checkpoint (2026-08-21)
+
+**Status:** ACTIVE (implemented; Codex ultra code cascade before deploy)
+**Valid from:** 2026-08-21
+
+### Context
+Staff feedback round 1: both testers failed first-try on monitor photos
+(calibration finding #2). Failure decomposition: corner placement is a precision
+cliff, failures are silent until the end, and recovery required editing raw JSON.
+
+### Decision
+The trio in webapp-design.md § 2026-08-21 (v2 + v3 amendments — the v3 text is
+the implementation contract, forged by TWO Codex ultra design-review rounds,
+both REJECT, all 25 findings folded in):
+1. **§A corner-placement guidance** — size-independent placement rule + captioned
+   正確/錯誤 real-photo thumbnails + 拍螢幕請直接截圖 hints.
+2. **§B staged photo extraction** — ONE extraction runs at preview time (round-2
+   measured classify ≈ 0.1 s vs rectify ≈ 2.5 s, so the checkpoint is free);
+   the user verifies the rectified board + canonical grid before the staged
+   result is committed (closed 5-message worker protocol bound to
+   epoch/revision/generation/token). The human is the verifier that fail-closed
+   `refine_corners` lacks.
+3. **§C click-to-cycle editor** — blindspot-pattern interaction (verified live on
+   their deployment) over the existing rerender loop: stones-only mutations,
+   kind-aware review rings + point inspector (never blind-cycle a flagged
+   point), client-owned review lifecycle, inverse-patch undo, role=grid
+   keyboard editing + coordinate-form fallback.
+Engine additions are additive only: `ExtractionResult.uncertain`
+(warning-mirroring structured points; warning STRINGS stay byte-frozen) and
+`extract_photo_artifact()` returning `{result, canonical, refined,
+corners_used}` in one pass; `geom` payload comes from render.py's own
+`BoardGeometry`. E2E-verified locally in Chrome before the cascade (both modes,
+cycle + undo + checkpoint + inspector + ring lifecycle).
+
 ## D-006 — Photo mode ships to the web as a fallback picker (B3 gate consciously overridden) (2026-08-21)
 
 **Status:** ACTIVE (shipped — goban-svg.pages.dev)
@@ -93,10 +154,11 @@ assumption passes (proven: the original wedge-probe design was green
 synthetically and missed all three real wedges — design review F5/BLOCKER).
 
 ### Decision
-The three committed screenshots + their hand-verified `.json` sidecars in
-`examples/` are permanent regression fixtures (`tests/test_real_examples.py`,
-exact-equality + zero warnings). An extractor change that alters a real reading
-must be re-verified visually and the sidecar regenerated deliberately.
+The committed screenshots + their verified `.json` sidecars in `examples/` are
+permanent regression fixtures (`tests/test_real_examples.py`, exact-equality +
+zero warnings) — originally three, board-4 added 2026-08-21 (verified via a
+class-ring overlay diff). An extractor change that alters a real reading must
+be re-verified visually and the sidecar regenerated deliberately.
 
 ## D-002 — Wedge detection: corner-region connected components (2026-08-19)
 

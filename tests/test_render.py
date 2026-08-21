@@ -125,6 +125,44 @@ def test_geometry_row_one_is_at_the_bottom() -> None:
         assert _close(x, expected[0]) and _close(y, expected[1]), point.notation()
 
 
+def test_geometry_agrees_with_the_rendered_grid_lines() -> None:
+    """v3 R2-F11 round trip: the geometry a caller publishes must BE the geometry
+    the SVG drew.
+
+    The web editor turns a click into an intersection through ``geom: {cell,
+    originX, originY}`` -- one BoardGeometry instantiated with the SAME cell and
+    coords passed to ``render_svg``, never a re-derived ratio. If the two could
+    drift apart, every board edit would land on the wrong point, so this asserts
+    against the SVG's own first/last grid-line coordinates rather than against a
+    restated formula.
+    """
+    for size, cell, coords in ((19, 36.0, False), (9, 24.0, True), (13, 41.5, True)):
+        case = f"size={size} cell={cell} coords={coords}"
+        svg = render_svg(Position(size=size), cell=cell, coords=coords)
+        geo = BoardGeometry(size=size, cell=cell, coords=coords)
+        xs: list[float] = []
+        ys: list[float] = []
+        for line in ET.fromstring(svg).iter(f"{SVG_NS}line"):
+            x1, y1 = float(line.get("x1")), float(line.get("y1"))
+            x2, y2 = float(line.get("x2")), float(line.get("y2"))
+            if x1 == x2:
+                xs.append(x1)  # a vertical grid line, at this x
+            if y1 == y2:
+                ys.append(y1)  # a horizontal grid line, at this y
+        assert len(xs) == len(ys) == size, f"{case}: one line per grid line"
+        assert xs == sorted(xs) and ys == sorted(ys), f"{case}: lines are emitted in order"
+        span = (size - 1) * cell
+        # render_svg writes coordinates to 3 decimals, so that is the tolerance.
+        for got, want, label in (
+            (xs[0], geo.origin_x, "first vertical"),
+            (xs[-1], geo.origin_x + span, "last vertical"),
+            (ys[0], geo.origin_y, "first horizontal"),
+            (ys[-1], geo.origin_y + span, "last horizontal"),
+        ):
+            assert abs(got - want) < 1e-3, f"{case}: {label} at {got}, geometry says {want}"
+        assert abs((xs[-1] - xs[0]) / (size - 1) - geo.cell) < 1e-3, f"{case}: cell"
+
+
 # --------------------------------------------------------------------------- #
 # render_svg
 # --------------------------------------------------------------------------- #

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "goban-svg"
-version = "0.1.0"
+version = "0.1.1"
 description = "Convert screenshots of Go board positions into clean SVG diagrams (pure stdlib, zero runtime deps)"
 readme = "README.md"
 requires-python = ">=3.10"
