@@ -3,6 +3,9 @@
  * Protocol (postMessage):
  *   in : {type:"boot"}
  *   in : {type:"convert",  id, width, height, buf}   buf = transferred ArrayBuffer, packed RGB
+ *   in : {type:"photo",    id, width, height, buf, corners, size}
+ *                                                    corners = [[x,y] x4] TL,TR,BR,BL in
+ *                                                    decoded-bitmap px (auto-refined engine-side)
  *   in : {type:"rerender", id, json}                 json = edited Position JSON text
  *   out: {type:"boot-progress", stage}
  *   out: {type:"ready", appVersion, pyodideVersion}
@@ -20,6 +23,7 @@ import json as _json
 
 from goban_svg.board import Position
 from goban_svg.extract import ExtractionError, extract_position
+from goban_svg.photo import extract_photo_position
 from goban_svg.png_codec import Image
 from goban_svg.render import render_svg
 from goban_svg.sgf import position_to_sgf
@@ -68,6 +72,25 @@ def rerender(text):
         return _err("invalid", exc)
     except Exception as exc:
         return _err("internal", exc)
+
+
+def photo_rgb(js_buf, width, height, corners_json, size):
+    try:
+        pixels = bytearray(width * height * 3)
+        js_buf.assign_to(pixels)
+        img = Image(width=width, height=height, pixels=pixels)
+        corners = [tuple(c) for c in _json.loads(corners_json)]
+        result = extract_photo_position(img, corners, size)
+        payload = _json.loads(_ok(result.position, result.warnings))
+        payload["mode"] = "photo"
+        return _json.dumps(payload)
+    except ExtractionError as exc:
+        return _err("extract", exc)
+    except ValueError as exc:
+        # corner-geometry complaints, not JSON problems (picker review m7)
+        return _err("corners", exc)
+    except Exception as exc:
+        return _err("internal", exc)
 `;
 
 let bootPromise = null;
@@ -105,7 +128,7 @@ self.onmessage = async (event) => {
     return;
   }
 
-  if (msg.type === "convert" || msg.type === "rerender") {
+  if (msg.type === "convert" || msg.type === "rerender" || msg.type === "photo") {
     try {
       const { py } = await ensureBoot();
       let raw;
@@ -116,6 +139,15 @@ self.onmessage = async (event) => {
           raw = py.runPython(`convert_rgb(_RGB_JS, ${msg.width | 0}, ${msg.height | 0})`);
         } finally {
           py.runPython("del _RGB_JS"); // release the JsProxy so the buffer can be GC'd
+        }
+      } else if (msg.type === "photo") {
+        const view = new Uint8Array(msg.buf);
+        py.globals.set("_RGB_JS", view);
+        py.globals.set("_CORNERS_JSON", JSON.stringify(msg.corners));
+        try {
+          raw = py.runPython(`photo_rgb(_RGB_JS, ${msg.width | 0}, ${msg.height | 0}, _CORNERS_JSON, ${msg.size | 0})`);
+        } finally {
+          py.runPython("del _RGB_JS; del _CORNERS_JSON");
         }
       } else {
         py.globals.set("_JSON_TEXT", msg.json);

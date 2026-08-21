@@ -2,6 +2,27 @@
 
 > Temporal decision log. Newest first. Minor decisions are single bullets.
 
+## D-006 — Photo mode ships to the web as a fallback picker (B3 gate consciously overridden) (2026-08-21)
+
+**Status:** ACTIVE (shipped — goban-svg.pages.dev)
+**Valid from:** 2026-08-21
+**Supersedes:** the photo design review's release gate B3 ("no user-visible photo mode
+before a physical-board corpus"), by owner decision.
+
+### Context
+Joseph explicitly asked for a UI step offering corner-picking when a slanted board
+photo is detected. Since B3 was written, the evidence changed: calibration finding #1
+showed the classifier thresholds sound on the first real photo, and fail-closed
+auto-refinement now absorbs rough corner placement.
+
+### Decision
+Photo mode is a FALLBACK flow, not a mode toggle: when automatic extraction fails on a
+selected image, the error panel offers 「點四個角試試（實驗性）」 (plus an
+always-visible link). Corner picker = canvas with 4 numbered draggable handles +
+convexity gating + size select; results carry a sticky 實驗性 banner and zh-TW
+translations of the photo warnings. The physical-board calibration corpus remains an
+open ask — the mode stays labeled experimental until it lands.
+
 ## D-005 — Web app phase 1: static Cloudflare Pages + client-side Pyodide, zh-TW UI (2026-08-19)
 
 **Status:** ACTIVE (shipped — https://goban-svg.pages.dev)

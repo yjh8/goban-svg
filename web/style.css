@@ -83,6 +83,29 @@ figcaption { font-size: .82rem; color: #6b5c46; text-align: center; margin-top: 
 .file-btn { position: relative; overflow: hidden; background: var(--panel); color: var(--ink); border-color: #c9b48a; }
 .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
+.linklike {
+  background: none; border: none; color: var(--accent); text-decoration: underline;
+  cursor: pointer; font-size: .95rem; padding: .4rem 0; min-height: 44px;
+}
+.photo-mode-link { margin: .2rem 0 0; text-align: center; }
+#picker-wrap { overflow: auto; border-radius: 8px; }
+#picker-canvas { display: block; width: 100%; height: auto; border-radius: 8px;
+  touch-action: none; cursor: crosshair; }
+#picker-canvas:focus-visible { outline: 3px solid var(--accent); }
+.handle-select { display: flex; gap: .5rem; margin-top: .6rem; flex-wrap: wrap; }
+.handle-select button { min-height: 44px; padding: .4rem .8rem; border-radius: 8px;
+  border: 1px solid #c9b48a; background: var(--panel); color: var(--ink); cursor: pointer; }
+.handle-select button[aria-pressed="true"] { background: var(--wood); border-color: var(--accent); font-weight: 700; }
+.picker-controls { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; margin-top: .8rem; }
+.picker-controls label { display: flex; gap: .5rem; align-items: center; }
+.picker-controls select { min-height: 44px; font-size: 1rem; border-radius: 8px;
+  border: 1px solid #c9b48a; background: var(--panel); padding: 0 .5rem; }
+.btn.secondary { background: var(--panel); color: var(--ink); border: 1px solid #c9b48a; }
+#experimental-banner {
+  background: #fff1cc; border: 1px solid #d8a53a; border-radius: var(--radius);
+  padding: .5rem 1rem; margin-bottom: .8rem; font-weight: 600;
+}
+
 footer { margin-top: 2rem; font-size: .84rem; color: #6b5c46; border-top: 1px solid #e3d5b8; padding-top: .8rem; }
 
 @media (max-width: 44rem) {

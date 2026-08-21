@@ -21,15 +21,44 @@
       <img id="preview" alt="已選擇的棋盤圖片預覽" hidden>
     </label>
     <button id="convert-btn" disabled>轉換成棋譜圖</button>
+    <p class="photo-mode-link"><button id="photo-mode-link" class="linklike" hidden>實體棋盤照片？改用照片模式（實驗性）</button></p>
     <p id="status" role="status" aria-live="polite"></p>
     <div id="error-box" role="alert" hidden>
       <p id="error-main"></p>
+      <p><button id="photo-fallback-btn" class="btn" hidden>看起來是實體棋盤照片？點四個角試試（實驗性）</button></p>
       <details><summary>技術詳情</summary><pre id="error-detail"></pre></details>
     </div>
   </section>
 
+  <section id="picker-section" aria-label="照片模式：點選棋盤角點" hidden>
+    <h2>照片模式（實驗性）</h2>
+    <p class="hint">請依序拖曳 <strong>1–4 號控制點</strong>到棋盤四個角的<strong>交叉點</strong>
+      （1 左上 → 2 右上 → 3 右下 → 4 左下）。大致準確即可 — 系統會依格線自動微調。
+      照片模式只辨識<strong>棋子</strong>（實體棋盤沒有手數與記號）。</p>
+    <div id="picker-wrap"><canvas id="picker-canvas" tabindex="0" aria-label="棋盤角點選取畫布：方向鍵微調選取的控制點，Shift 加速"></canvas></div>
+    <div class="handle-select" role="group" aria-label="選擇控制點（點畫布可直接放置）">
+      <button aria-pressed="true">1 左上</button>
+      <button aria-pressed="false">2 右上</button>
+      <button aria-pressed="false">3 右下</button>
+      <button aria-pressed="false">4 左下</button>
+    </div>
+    <div class="picker-controls">
+      <label>棋盤大小
+        <select id="photo-size">
+          <option value="19" selected>19 路</option>
+          <option value="13">13 路</option>
+          <option value="9">9 路</option>
+        </select>
+      </label>
+      <button id="photo-convert-btn" class="btn">依角點轉換</button>
+      <button id="picker-cancel-btn" class="btn secondary">返回</button>
+    </div>
+    <p id="picker-status" role="status" aria-live="polite"></p>
+  </section>
+
   <section id="result-section" aria-label="辨識結果" hidden>
     <h2>辨識結果</h2>
+    <p id="experimental-banner" hidden>照片模式為實驗性功能，請務必逐子核對盤面。</p>
     <p id="summary"></p>
 
     <div id="warnings-box" hidden>
