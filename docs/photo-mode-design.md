@@ -242,3 +242,57 @@ Stress profile: moiré banding, glare gradients, perspective tilt, screen bezel.
 - Still needed from staff: true PHYSICAL-board photos (wood grain, real stones,
   shadows) — a monitor photo shares the app's rendered palette, so wood/stone
   chroma constants remain unproven on real materials.
+
+### Finding #2 — 172444 (2026-08-21, staff feedback round 1: two first-try failures)
+
+Inputs: `screenshots/172444.jpg` (dim phone photo of a 星陣 game on a monitor;
+staff test #1, reproduced by Joseph and by this session) and
+`screenshots/S__158048260/61.jpg` (staff test #2's own failure artifacts).
+All numbers below measured with carefully re-derived corners (±2–3 px, verified
+against a rectified-overlay render).
+
+1. **Corner placement is the first killer, again — now with staff evidence.**
+   Test #2's screenshots show the handles placed on the app window's chrome,
+   well outside the outer grid lines: the sampling grid stretched onto bezel
+   and toolbar, reading edge rows/columns as WHITE walls (bright chrome) —
+   黑6子/白40子 garbage. The uncertainty list in Joseph's own run clustered on
+   rows 16–19 + edge columns: the outward-offset signature (error ∝ distance
+   from board center). UX consequences → webapp-design.md 2026-08-21 §A/§B.
+2. **`refine_corners` fail-closed on this photo from every corner set tried**
+   (finding #1's monitor photo converged; this one is dimmer with stronger
+   moiré). Fail-closed behaved as designed — but it means user precision was
+   load-bearing, which motivated §B's human-verified rectified-grid preview.
+3. **Dim monitor photo compresses white contrast BELOW the white floor.**
+   Measured ΔL with good geometry: true whites span **+8.0 … +16.3** (19
+   candidates); empty cluster |ΔL| < 8 with spread ≈ 2; blacks ≤ −118. With
+   `WHITE_MIN = 20`, zero whites are structurally recoverable on this photo;
+   the 9 whites under `T_EMPTY = 12` died SILENTLY (no warning at all), the
+   rest were honestly warned. A clean gap separates the empty cluster from the
+   white band → **calibration hypothesis H1: adaptive white cutoff from the
+   photo's own ΔL gap** (guard against false whites on truly empty boards
+   before adopting; needs the physical corpus).
+4. **App-rendered move numbers break the disc median on white stones.** The
+   dark glyph covers enough of the disc that: B17 (white "5") → ΔL **−133.8 →
+   misread as a BLACK stone**; E18 (white + gold dot) → −29.7 → black; whites
+   "8"/"10"/"14" → +4.7…+7.5 → silently empty. Photo mode's stones-only
+   assumption ("real boards have no printed numbers") is *violated by monitor
+   photos specifically* — physical boards don't have this failure class.
+   **Hypothesis H2: a glyph-robust white statistic** (e.g. upper-quartile disc
+   luminance for the white test) if monitor photos stay a real use case.
+5. **The same content as a true screenshot extracts perfectly.** Staff test
+   #2's program, captured as an actual screenshot (`examples/board-4.png`, now
+   a committed fixture): 31 black + 31 white + 2 marks + 1 label, zero
+   warnings, verified stone-by-stone via a class-ring overlay diff. Product
+   guidance follows: 螢幕內容請直接截圖；照片模式留給實體棋盤 (§A hint).
+6. **Residual spatially-varying grid error persists even with careful manual
+   corners** — two corner sets 10–15 px apart flipped *which* whites fell in
+   the warned band (lens distortion / rolling shutter / my hand precision).
+   When the corpus lands, finding #1's deferred option — least-squares
+   homography update from all 38 fitted lines — is the right escalation (H3).
+7. The 星陣 analysis overlay (winrate circle at B16) reads as a black stone —
+   inherent to photographing an app UI; another §A reason to prefer screenshots.
+
+Assets: `172444.jpg` stays in `screenshots/` as a calibration asset — NOT
+promoted to `examples/` (extraction ≠ truth until H1/H2 land; promotion
+criterion: whites recovered with no false stones). H1–H3 are UNCALIBRATED
+hypotheses awaiting the physical-board corpus Joseph is collecting.

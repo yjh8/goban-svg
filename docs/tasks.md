@@ -2,12 +2,16 @@
 
 ## In Progress
 
-1. **Staff verification round** — Joseph shared https://goban-svg.pages.dev with the
-   海峰棋院 team (2026-08-19 evening). Collect: more test examples + correctness
-   verification (Joseph doesn't read Go positions). Every verified case → `examples/`
-   regression fixture (D-003); every failure → original image + what's wrong.
-2. **Web app code-review follow-ups** — Codex review of `web/` ran at landing; apply
-   any findings and redeploy (same URL).
+1. **Staff verification round** — round 1 processed 2026-08-21: two first-try failures,
+   both on MONITOR photos (not physical boards). Triaged → calibration finding #2
+   (photo-mode-design.md) + `examples/board-4` fixture (the same program's true
+   screenshot extracts perfectly). Joseph is now collecting REAL physical-board photos
+   from staff — that corpus unblocks the H1–H3 calibration hypotheses.
+2. **Correction editor + photo-confidence UX trio** — design written
+   (webapp-design.md § 2026-08-21): corner-placement guidance, rectified-grid
+   confirmation step, click-to-cycle editor + `geom`/`uncertain` payloads. Codex
+   ultra design review in flight; implement after findings are addressed, then
+   code-review cascade + redeploy.
 
 ## Backlog
 
@@ -16,12 +20,13 @@
    confirms phase 1 works (D-004 sequencing).
 2. Warning i18n hardening — stable warning codes from the extractor instead of the
    zh-TW regex map in app.js (drift risk, design amendment 11).
-3. **Photo mode calibration (corpus still wanted)** — the corner-picker fallback UI
-   shipped 2026-08-21 (D-006, owner override of B3; experimental label + fail-closed
-   refinement mitigations). Still collect real PHYSICAL-board photos from staff
-   (varied lighting/angles/woods, empty + dense boards, corner stones) — every
-   verified one becomes an `examples/photo-*` fixture (D-003) and retires the
-   UNCALIBRATED tags. Perf backlog: photo mode ≈35 s under Pyodide (refine passes
+3. **Photo mode calibration (corpus incoming)** — real PHYSICAL-board photos are being
+   collected by Joseph (varied lighting/angles/woods, empty + dense boards, corner
+   stones) — every verified one becomes an `examples/photo-*` fixture (D-003) and
+   retires the UNCALIBRATED tags. Measured hypotheses waiting on the corpus
+   (finding #2): H1 adaptive white cutoff from the photo's own ΔL gap · H2
+   glyph-robust white statistic (monitor photos) · H3 least-squares homography from
+   all 38 fitted lines. Perf backlog: photo mode ≈35 s under Pyodide (refine passes
    rectify up to 4x) — consider a coarse-cell refinement pass if staff complain.
 4. (Deferred, small) Codex re-verification round for a clean `APPROVE-0` receipt on
    the v0.1.0 CLI diff — round 1 + fixes are stamped; the re-run was stopped mid-flight.

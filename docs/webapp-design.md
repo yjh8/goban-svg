@@ -130,3 +130,102 @@ scripts/deploy-web.sh   # uv build → copy wheel → wrangler pages deploy web/
     stale Cloudflare rationale lines corrected (paid Workers CPU is configurable to 5 min;
     Workers Static Assets is CF's newer recommendation — Pages remains fine here);
     a11y basics (labelled file input, keyboard operable, aria-live status, 44 px targets).
+
+---
+
+## Correction editor + photo-confidence flow (2026-08-21 design — staff feedback round 1)
+
+> Status: DESIGN. Trigger: first staff feedback — two testers, both failed first try on
+> *monitor photos* (measured post-mortem: photo-mode-design.md § Calibration log,
+> finding #2). The failures decompose into (a) corner placement is a precision cliff,
+> (b) failures are silent until the very end, (c) recovery requires editing raw JSON —
+> a programmer's surface. Three UI changes + two additive payload fields close (a)–(c).
+> Classifier thresholds are deliberately NOT touched: calibration waits for the
+> physical-board corpus (Joseph is collecting; finding #2 records the hypotheses).
+
+### A. Corner-placement guidance (photo mode)
+
+The picker's instruction line becomes a placement *rule*, illustrated:
+
+- Copy: 「把控制點放在**最外圈格線的交叉點**上（例：左上角 = 第19路橫線與第1路直線的
+  交點）。不要放在木框邊緣、視窗外框或座標數字上。」
+- A right/wrong thumbnail pair next to the copy (two small static images in
+  `web/assets/`, cropped from a real photo: handle ON the corner intersection ✓ /
+  handle out on the frame ✗). Staff evidence: both failures placed corners on
+  window chrome or outside the outer lines.
+- Anti-goal guard: when the selected image *is a screen capture territory* we say so
+  up front — the photo entry points (picker section + fallback button area) gain one
+  hint line: 「拍攝螢幕畫面？直接截圖用自動辨識，效果遠比拍照好。」(finding #2:
+  identical content extracts perfectly as a screenshot, catastrophically as a photo).
+
+### B. Rectified-grid confirmation step (photo mode)
+
+Fail-closed refinement currently has *no verifier* when it declines — the user waits
+~35 s and gets a wrong board plus a warning at the bottom. The fix mirrors how
+calibration itself is done: look at the rectified image with the grid drawn on it.
+
+- New worker op `{type:"photo-preview", id, width, height, buf, corners, size}`:
+  runs `refine_corners` + `rectify_board` ONLY (~seconds, no classification) and
+  returns `{rectifiedRGBA (transferred), rectSize, gridXs, gridYs, corners, refined}`
+  where `corners` are the (possibly refined) source-space corners and `refined` says
+  whether auto-refinement verified.
+- UI (replaces the picker's direct 開始辨識): after corner confirm → preview panel
+  shows the rectified board with the canonical grid overlaid (canvas), plus an honest
+  status line: 自動微調完成 ✓ / 「自動微調無法確認格線，將依你點的角點辨識」⚠.
+  Buttons: 「格線有對齊 → 開始辨識」 and 「沒對齊 → 重新點角」.
+- Confirm sends the normal `photo` job with the *returned* corners and a new
+  `refine:false` flag (worker passes `refine=False` through) — refinement never runs
+  twice, so the two-step flow costs one extra rectify (~1–2 s) and splits the long
+  wait into two legible halves.
+- The human becomes the verifier the fail-closed design lacks; a misaligned grid is
+  visible in about two seconds (the exact diagnostic that solved findings #1 and #2).
+
+### C. Click-to-cycle correction editor (both modes)
+
+The CLI's correction loop was ported as a JSON textarea — the function, not the
+workflow (the same lesson as the 2026-08-19 BLOCKER). The staff's actual loop is
+"look at the board, tap the wrong point". Pattern proven by the blindspot player
+(海峰 staff member's app, built on our wheel): click an intersection to cycle
+空 → 黑 → 白 → 空 — verified live on their deployment, including instant re-render.
+
+- One click handler on the inline SVG's container (`#svg-holder`); map click →
+  SVG viewBox coords → nearest intersection; accept within 0.42·cell (a miss does
+  nothing — never a wrong edit). No per-intersection DOM nodes.
+- The edit mutates the SAME JSON that `#json-editor` holds (it stays the single
+  source of truth), then triggers the existing `rerender` job — busy-freeze,
+  job-id staleness, provenance (`photoModeActive`), and Python-side validation are
+  all inherited unchanged. The JSON textarea stays for power users (labels, bulk).
+- Cycling a point to empty also deletes that point's label and mark (no orphaned
+  annotations); marks additionally get blindspot-style ✕ overlay chips
+  (「點 ✕ 移除記號」).
+- **Uncertain points are pre-marked**: dashed rings on the board at every point the
+  extractor left empty or flagged (from the structured `uncertain` payload below),
+  so the 「請人工確認」 list becomes visible geography instead of a text wall.
+  Tapping a ringed point cycles it like any other; its ring clears once edited.
+- Single-level undo stack (復原, JSON snapshots, cap ~50) — protects against
+  mis-taps, which blindspot's editor lacks.
+- Mobile: the 0.42·cell hit radius is ~8 CSS px on a 350 px board — tight but
+  fail-safe (recorded limitation; native pinch-zoom still works on the pane).
+
+### Payload additions (both additive; `warnings` strings unchanged)
+
+1. `geom: {cell, x0, y0}` — intersection (col i, row r) sits at
+   `(x0 + (i-1)·cell, y0 + (size-r)·cell)` in SVG user units. Computed in the worker
+   driver from render.py's own layout constants — the client never re-derives the
+   geometry. (Motivated by observing the blindspot integration hard-code a
+   re-implementation of render_svg's margins against cell=54 — a coupling that
+   breaks silently if our layout changes. Our own UI must not repeat that.)
+2. `uncertain: [{point, kind}]` — new additive `ExtractionResult.uncertain` field
+   emitted by both extractors wherever they currently emit a point-naming warning
+   (kinds: ambiguous, off-image, no-reference, warm-bright, unreadable-label,
+   ambiguous-color). The zh-TW warning regex map is untouched (its retirement is
+   the existing stable-warning-codes backlog item); the editor keys on this
+   structured list only — never on parsed warning strings.
+
+### Out of scope (deliberate)
+
+- Classifier threshold changes (white floor, glyph-robust white statistic,
+  38-line least-squares homography) — blocked on the physical-board corpus,
+  hypotheses recorded in finding #2.
+- Label/mark *creation* UI (JSON editor covers it; photo mode has none by design).
+- Editing marks' colors, SGF round-trip of edits (inherits existing lossiness note).

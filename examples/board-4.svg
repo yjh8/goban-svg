@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="699.84" height="699.84" viewBox="0 0 699.84 699.84">
+<defs>
+<radialGradient id="stone-black" cx="36%" cy="32%" r="65%"><stop offset="0%" stop-color="#6f6f6f"/><stop offset="55%" stop-color="#2a2a2a"/><stop offset="100%" stop-color="#000000"/></radialGradient>
+<radialGradient id="stone-white" cx="36%" cy="32%" r="65%"><stop offset="0%" stop-color="#ffffff"/><stop offset="55%" stop-color="#f2f2f2"/><stop offset="100%" stop-color="#d4d4d4"/></radialGradient>
+</defs>
+<rect x="0" y="0" width="699.84" height="699.84" fill="#e6c37a"/>
+<g stroke="#43361f" stroke-width="1.368" stroke-linecap="square">
+<line x1="25.92" y1="25.92" x2="673.92" y2="25.92"/>
+<line x1="25.92" y1="61.92" x2="673.92" y2="61.92"/>
+<line x1="25.92" y1="97.92" x2="673.92" y2="97.92"/>
+<line x1="25.92" y1="133.92" x2="673.92" y2="133.92"/>
+<line x1="25.92" y1="169.92" x2="673.92" y2="169.92"/>
+<line x1="25.92" y1="205.92" x2="673.92" y2="205.92"/>
+<line x1="25.92" y1="241.92" x2="673.92" y2="241.92"/>
+<line x1="25.92" y1="277.92" x2="673.92" y2="277.92"/>
+<line x1="25.92" y1="313.92" x2="673.92" y2="313.92"/>
+<line x1="25.92" y1="349.92" x2="673.92" y2="349.92"/>
+<line x1="25.92" y1="385.92" x2="673.92" y2="385.92"/>
+<line x1="25.92" y1="421.92" x2="673.92" y2="421.92"/>
+<line x1="25.92" y1="457.92" x2="673.92" y2="457.92"/>
+<line x1="25.92" y1="493.92" x2="673.92" y2="493.92"/>
+<line x1="25.92" y1="529.92" x2="673.92" y2="529.92"/>
+<line x1="25.92" y1="565.92" x2="673.92" y2="565.92"/>
+<line x1="25.92" y1="601.92" x2="673.92" y2="601.92"/>
+<line x1="25.92" y1="637.92" x2="673.92" y2="637.92"/>
+<line x1="25.92" y1="673.92" x2="673.92" y2="673.92"/>
+<line x1="25.92" y1="25.92" x2="25.92" y2="673.92"/>
+<line x1="61.92" y1="25.92" x2="61.92" y2="673.92"/>
+<line x1="97.92" y1="25.92" x2="97.92" y2="673.92"/>
+<line x1="133.92" y1="25.92" x2="133.92" y2="673.92"/>
+<line x1="169.92" y1="25.92" x2="169.92" y2="673.92"/>
+<line x1="205.92" y1="25.92" x2="205.92" y2="673.92"/>
+<line x1="241.92" y1="25.92" x2="241.92" y2="673.92"/>
+<line x1="277.92" y1="25.92" x2="277.92" y2="673.92"/>
+<line x1="313.92" y1="25.92" x2="313.92" y2="673.92"/>
+<line x1="349.92" y1="25.92" x2="349.92" y2="673.92"/>
+<line x1="385.92" y1="25.92" x2="385.92" y2="673.92"/>
+<line x1="421.92" y1="25.92" x2="421.92" y2="673.92"/>
+<line x1="457.92" y1="25.92" x2="457.92" y2="673.92"/>
+<line x1="493.92" y1="25.92" x2="493.92" y2="673.92"/>
+<line x1="529.92" y1="25.92" x2="529.92" y2="673.92"/>
+<line x1="565.92" y1="25.92" x2="565.92" y2="673.92"/>
+<line x1="601.92" y1="25.92" x2="601.92" y2="673.92"/>
+<line x1="637.92" y1="25.92" x2="637.92" y2="673.92"/>
+<line x1="673.92" y1="25.92" x2="673.92" y2="673.92"/>
+</g>
+<rect x="25.92" y="25.92" width="648" height="648" fill="none" stroke="#43361f" stroke-width="2.376"/>
+<circle cx="133.92" cy="565.92" r="3.78" fill="#43361f"/>
+<circle cx="133.92" cy="349.92" r="3.78" fill="#43361f"/>
+<circle cx="133.92" cy="133.92" r="3.78" fill="#43361f"/>
+<circle cx="349.92" cy="565.92" r="3.78" fill="#43361f"/>
+<circle cx="349.92" cy="349.92" r="3.78" fill="#43361f"/>
+<circle cx="349.92" cy="133.92" r="3.78" fill="#43361f"/>
+<circle cx="565.92" cy="565.92" r="3.78" fill="#43361f"/>
+<circle cx="565.92" cy="349.92" r="3.78" fill="#43361f"/>
+<circle cx="565.92" cy="133.92" r="3.78" fill="#43361f"/>
+<circle cx="61.92" cy="529.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="61.92" cy="493.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="61.92" cy="457.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="97.92" cy="601.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="97.92" cy="565.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="97.92" cy="529.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="97.92" cy="493.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="97.92" cy="421.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="133.92" cy="637.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="133.92" cy="565.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="133.92" cy="529.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="133.92" cy="493.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="133.92" cy="313.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="133.92" cy="205.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="133.92" cy="97.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="169.92" cy="637.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="169.92" cy="601.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="205.92" cy="601.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="205.92" cy="565.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="313.92" cy="133.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="313.92" cy="97.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="349.92" cy="601.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="349.92" cy="97.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="385.92" cy="565.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="385.92" cy="421.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="385.92" cy="133.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="421.92" cy="529.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="421.92" cy="205.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="457.92" cy="565.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="457.92" cy="529.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="457.92" cy="421.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="457.92" cy="385.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="493.92" cy="601.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="493.92" cy="493.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="493.92" cy="421.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="493.92" cy="385.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="493.92" cy="205.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="493.92" cy="97.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="529.92" cy="421.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="529.92" cy="385.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="529.92" cy="313.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="565.92" cy="601.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="565.92" cy="529.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="565.92" cy="493.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="565.92" cy="277.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="565.92" cy="205.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="565.92" cy="133.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="601.92" cy="565.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="601.92" cy="529.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="601.92" cy="493.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="601.92" cy="385.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="601.92" cy="349.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="601.92" cy="313.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="601.92" cy="277.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="601.92" cy="205.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="601.92" cy="169.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="637.92" cy="385.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="637.92" cy="349.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="637.92" cy="277.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="637.92" cy="205.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<circle cx="637.92" cy="169.92" r="16.92" fill="url(#stone-black)"/>
+<circle cx="673.92" cy="313.92" r="16.92" fill="url(#stone-white)" stroke="#444444" stroke-width="1.08"/>
+<polygon points="133.92,300.96 145.144,320.4 122.696,320.4" fill="none" stroke="#2b5fe3" stroke-width="2.16" stroke-linejoin="round"/>
+<rect x="342.36" y="414.36" width="15.12" height="15.12" fill="#1a1a1a"/>
+<text x="133.92" y="313.92" font-family="Helvetica, Arial, sans-serif" font-size="18.72" text-anchor="middle" dy="0.35em" fill="#151515">1</text>
+</svg>

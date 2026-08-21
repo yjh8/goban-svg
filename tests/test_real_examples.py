@@ -3,10 +3,11 @@
 The synthetic round trip (paint -> extract) is circular by construction: the
 painter and the extractor share geometry assumptions, so a shared wrong
 assumption passes it (design review F5, 2026-08-19 -- exactly what happened to
-the original wedge-probe design). These tests break the circle: the three
-committed screenshots in examples/ are real app output, and their .json
-sidecars were verified against the pixels by hand (stone by stone, marks,
-labels) on 2026-08-19. The extractor must keep reproducing them exactly.
+the original wedge-probe design). These tests break the circle: the committed
+screenshots in examples/ are real app output, and their .json sidecars were
+verified against the pixels stone by stone (marks and labels included) --
+boards 1-3 by hand on 2026-08-19, board-4 via a class-ring overlay diff on
+2026-08-21. The extractor must keep reproducing them exactly.
 
 If an extractor change legitimately improves a reading, re-verify the affected
 board visually and regenerate its sidecar with:
@@ -26,7 +27,7 @@ from goban_svg.board import WEDGE_BLUE, WEDGE_RED
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
 
-@pytest.mark.parametrize("name", ["board-1", "board-2", "board-3"])
+@pytest.mark.parametrize("name", ["board-1", "board-2", "board-3", "board-4"])
 def test_committed_screenshot_extracts_to_committed_json(name: str) -> None:
     result = extract_position(load_image(EXAMPLES / f"{name}.png"))
     expected = json.loads((EXAMPLES / f"{name}.json").read_text(encoding="utf-8"))
@@ -60,6 +61,21 @@ def test_board2_and_board3_acceptance_highlights() -> None:
     assert pos3.stones[Point.parse("C3")] == "black"
     assert pos3.marks[Point.parse("C15")] == Mark("square", "white")
     assert not pos3.labels
+
+
+def test_board4_acceptance_highlights() -> None:
+    # First staff-supplied fixture (2026-08-21): a DIFFERENT Go program's
+    # screenshot (new palette, stone style, and chrome). Verified stone-by-stone
+    # via a class-ring overlay diff against the original pixels. Highlights: a
+    # labeled white stone under a blue triangle, and a black square marker on an
+    # empty point (not a stone).
+    pos = extract_position(load_image(EXAMPLES / "board-4.png")).position
+    assert pos.size == 19
+    assert pos.stones[Point.parse("D11")] == "white"
+    assert pos.labels[Point.parse("D11")] == "1"
+    assert pos.marks[Point.parse("D11")].type == "triangle"
+    assert pos.marks[Point.parse("K8")] == Mark("square", "black")
+    assert Point.parse("K8") not in pos.stones
 
 
 def test_photo1_real_monitor_photo_with_rough_corners() -> None:
