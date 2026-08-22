@@ -933,6 +933,10 @@ function commitTransaction(tx, p) {
   }
 
   if (!cursorPoint) cursorPoint = initialCursor();
+  // Any inspector still open is showing pre-commit state — its buttons and
+  // review list are a snapshot taken before this transaction resolved the
+  // point (r8 B-4). Close it rather than let a stale control act.
+  closeInspector();
   renderWarnings();
   renderRefinedLine();
   renderOverlay();
@@ -1077,9 +1081,12 @@ function removeMarkAt(notation) {
  * still a history step, with the same review inverse every other entry carries. */
 function confirmReviewAt(notation) {
   if (!canRun("stone")) { blockedNotice(); return; }
-  noteEditorMutation();
+  // Nothing left to confirm = not a mutation. A Confirm button left visible by a
+  // stale inspector must not discard a live checkpoint as a no-op (r8 B-4) —
+  // exactly the shape of the undo() bug, found by re-sweeping the machine.
   const ids = openReviewsAt(notation).filter((r) => CLASSIFICATION_KINDS.has(r.kind)).map((r) => r.id);
   if (!ids.length) return;
+  noteEditorMutation();
   const entry = { op: "review", point: notation, reviewInverse: reviewSnapshot(ids) };
   resolveReviews(ids, "confirmed");
   pushHistory(entry);

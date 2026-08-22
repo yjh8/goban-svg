@@ -18,10 +18,16 @@ Standing fix: `scripts/codex-review.sh` — per-project `CODEX_HOME` under
 `~/.codex-homes/<project>/`, detached via python3 `start_new_session` (macOS has
 no `setsid`), prompt fed on stdin via `codex exec -` (dodges ARG_MAX and gives
 stdin a clean EOF), `--ignore-user-config` so no personal MCP/plugins load.
-**The home lives outside the repo on purpose**: it holds a copy of `auth.json`,
-and anything in-tree is inside the review boundary the agent reads — gitignoring
-it stops commits, not reads (r7 BLOCKER, caught by the review of the wrapper
-itself). Diagnostic order for a review that dies for no reason:
+**Credential handling took three review rounds to get right** (all against the
+wrapper itself): first `auth.json` was copied INTO the repo — gitignoring stops
+commits, not reads, and the tree is exactly what the agent is pointed at; moving
+the copy outside helped but the next round probed it and showed a same-UID
+`--sandbox read-only` agent can read it anywhere. The resolution is to create no
+second copy at all: `auth.json` is a SYMLINK to `~/.codex/auth.json`. The
+residual risk is inherent and pre-existing — a review agent runs as you and can
+read `~/.ssh`, `~/.aws`, and the original token regardless — so isolation buys
+scope (no personal MCP/plugins, no other projects' sessions), not a filesystem
+sandbox. Treat reviewed repos and prompts as trusted input. Diagnostic order for a review that dies for no reason:
 (1) grep the output for `failed to renew cache TTL`, (2) check whether a session
 file was ever created (absent = the stdin hang instead), (3) only then suspect
 quotas or memory. Note: there is NO one-ultra-at-a-time limit and no subagent cap —
