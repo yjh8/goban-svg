@@ -14,9 +14,14 @@ renewal failed — `ERROR codex_models_manager::manager: failed to renew cache T
 missing field 'base_instructions'` repeated in the output right before each death.
 A fifth run survived only when both isolated AND detached.
 
-Standing fix: `scripts/codex-review.sh` — project-local `CODEX_HOME=.codex-home/`
-(gitignored, seeded from `~/.codex`), `setsid` so no supervising agent's cleanup
-can reap it, stdin closed. Diagnostic order for a review that dies for no reason:
+Standing fix: `scripts/codex-review.sh` — per-project `CODEX_HOME` under
+`~/.codex-homes/<project>/`, detached via python3 `start_new_session` (macOS has
+no `setsid`), prompt fed on stdin via `codex exec -` (dodges ARG_MAX and gives
+stdin a clean EOF), `--ignore-user-config` so no personal MCP/plugins load.
+**The home lives outside the repo on purpose**: it holds a copy of `auth.json`,
+and anything in-tree is inside the review boundary the agent reads — gitignoring
+it stops commits, not reads (r7 BLOCKER, caught by the review of the wrapper
+itself). Diagnostic order for a review that dies for no reason:
 (1) grep the output for `failed to renew cache TTL`, (2) check whether a session
 file was ever created (absent = the stdin hang instead), (3) only then suspect
 quotas or memory. Note: there is NO one-ultra-at-a-time limit and no subagent cap —

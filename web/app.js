@@ -1115,12 +1115,14 @@ function updateUndoButton() {
 
 function undo() {
   if (!canRun("undo")) { blockedNotice(); return; }
+  // Nothing to undo = not a mutation: a stray Ctrl/Cmd+Z must not discard a
+  // live checkpoint (r7 m3). Check BEFORE touching any state.
+  const top = history[history.length - 1];
+  if (!top) return;
   closeInspector(); // an open popover would otherwise display pre-undo state
   // Covers the review-only branch below, which returns before beginTransaction
   // ever runs (r6 A-M1).
   noteEditorMutation();
-  const top = history[history.length - 1];
-  if (!top) return;
   const entry = top.entry;
   if (entry.op === "review") {
     history.pop();
@@ -1261,6 +1263,10 @@ function positionInspector() {
   const wrap = $("board-wrap");
   const ww = wrap.clientWidth;
   const wh = wrap.clientHeight;
+  // An ancestor hidden by the mobile tab switch measures 0 — writing those
+  // coordinates would pin the dialog to the corner (r7 m4). Skip; the tab
+  // handler repositions when the diagram pane comes back.
+  if (!ww || !wh || !box.offsetWidth) return;
   const half = box.offsetWidth / 2 + 4;
   const bh = box.offsetHeight;
   const cx = Math.min(Math.max((pct.left / 100) * ww, half), Math.max(ww - half, half));
@@ -1379,6 +1385,11 @@ $("rerender-btn").addEventListener("click", () => {
 $("json-import").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  // Ticket for THIS import, taken as soon as a file exists — BEFORE any
+  // validation return, so even a rejected newer selection supersedes an older
+  // in-flight read (r6 A-M7; r7 m5). The newest selection always wins.
+  importSeq += 1;
+  const myImport = importSeq;
   if (workerOccupied) { e.target.value = ""; setStatus("辨識中，請稍候再匯入 JSON。"); return; }
   if (file.size > MAX_JSON_CHARS) {
     showError("JSON 檔案過大（上限約 2 MB）。", `${file.name}: ${file.size} bytes`);
@@ -1387,11 +1398,6 @@ $("json-import").addEventListener("change", async (e) => {
   }
   const epoch = selectionEpoch;
   const bufferRev = jsonBufferRevision;
-  // Ticket for THIS import. Two concurrent imports capture the same buffer
-  // revision, so the buffer check alone let whichever finished FIRST win and
-  // then rejected the newer selection (r6 A-M7). The newest import always wins.
-  importSeq += 1;
-  const myImport = importSeq;
   const text = await file.text();
   // Re-guard after the await: a new image, a running job, a NEWER import, or
   // manual typing since the read started must all win over this slow import.
@@ -1423,6 +1429,10 @@ function selectTab(which) {
   const showOriginal = which === "original";
   $("pane-original").hidden = !showOriginal;
   $("pane-diagram").hidden = showOriginal;
+  // The board pane's visibility just changed: an open inspector was either
+  // measured at zero (hidden) or is now measurable again (r7 m4).
+  if (showOriginal) closeInspector();
+  else requestAnimationFrame(positionInspector);
   $("tab-original").classList.toggle("active", showOriginal);
   $("tab-diagram").classList.toggle("active", !showOriginal);
   $("tab-original").setAttribute("aria-selected", String(showOriginal));

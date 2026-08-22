@@ -123,9 +123,8 @@ contracts), `docs/build-learnings.md` (what went wrong and why, worth reading fi
 | `web/` | tracked | The zh-TW web app (static; Pyodide runs the package in-browser) → goban-svg.pages.dev |
 | `web/assets/` | tracked | Static images the app serves (corner-placement 正確／錯誤 guidance photos for photo mode) |
 | `web/wheels/` | tracked | Immutable published-wheel archive: every wheel ever deployed, byte-for-byte, + `SHA256SUMS` (deploy refuses to replace published bytes; smoke re-verifies each URL) |
-| `scripts/` | tracked | `deploy-web.sh` — deterministic build + stage + Cloudflare Pages deploy; `smoke-web.sh` — post-deploy assertions (headers, runtime, published-wheel hashes); `codex-review.sh` — review runner with project-local Codex state |
+| `scripts/` | tracked | `deploy-web.sh` — deterministic build + stage + Cloudflare Pages deploy; `smoke-web.sh` — post-deploy assertions (headers, runtime, published-wheel hashes); `codex-review.sh` — review runner (per-project Codex state in `~/.codex-homes/`, outside the repo) |
 | `web-dist/` | **gitignored** | Deploy staging built by `scripts/deploy-web.sh` (wheel + self-hosted Pyodide) |
-| `.codex-home/` | **gitignored** | Project-local `CODEX_HOME` for `scripts/codex-review.sh` (holds a copy of `auth.json` — never commit) |
 | `session_logs/` | tracked | Per-session provenance logs + changelog archives (fleet doc lifecycle) |
 | `session_handoff/` | tracked | Starter-prompt handoffs for the next session (fleet doc lifecycle) |
 | `.github/workflows/` | tracked | CI: ruff check + format + pytest on Python 3.10/3.13 |
