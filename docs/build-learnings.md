@@ -27,7 +27,9 @@ second copy at all: `auth.json` is a SYMLINK to `~/.codex/auth.json`. The
 residual risk is inherent and pre-existing — a review agent runs as you and can
 read `~/.ssh`, `~/.aws`, and the original token regardless — so isolation buys
 scope (no personal MCP/plugins, no other projects' sessions), not a filesystem
-sandbox. Treat reviewed repos and prompts as trusted input. Diagnostic order for a review that dies for no reason:
+sandbox. Treat reviewed repos and prompts as trusted input.
+
+Diagnostic order for a review that dies for no reason:
 (1) grep the output for `failed to renew cache TTL`, (2) check whether a session
 file was ever created (absent = the stdin hang instead), (3) only then suspect
 quotas or memory. Note: there is NO one-ultra-at-a-time limit and no subagent cap —
