@@ -16,6 +16,8 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MANIFEST="${3:-$REPO_ROOT/web/wheels/SHA256SUMS}"
 
 fail() { echo "SMOKE FAIL: $1" >&2; exit 1; }
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
 
 HDRS=$(curl -fsSI "$BASE/") || fail "index not reachable"
 echo "$HDRS" | grep -qi "content-security-policy: .*connect-src 'self'" || fail "CSP missing/weak"
@@ -25,15 +27,15 @@ CFG=$(curl -fsS "$BASE/gen/config.js") || fail "gen/config.js not reachable"
 [ -n "$WHEEL" ] && { echo "$CFG" | grep -q "$WHEEL" || fail "config.js does not name $WHEEL"; }
 W=$(echo "$CFG" | sed -nE 's/export const WHEEL = "([^"]+)".*/\1/p')
 
-curl -fsSI "$BASE/wheels/$W" | grep -q "200" || fail "wheel $W not fetchable"
+# Pages returns 200 + index.html for missing paths, so identify by CONTENT (r11).
+curl -fsSL "$BASE/wheels/$W" -o "$TMPD/w.bin" 2>/dev/null || fail "wheel $W not fetchable"
+[ "$(head -c 2 "$TMPD/w.bin")" = "PK" ] || fail "wheel $W is not served (got a non-zip body — Pages fallback)"
 curl -fsSI "$BASE/pyodide/pyodide.mjs" | grep -q "200" || fail "pyodide.mjs not fetchable"
 curl -fsSI "$BASE/pyodide/pyodide.asm.wasm" | grep -q "200" || fail "wasm not fetchable"
 curl -fsS "$BASE/" | grep -q "棋譜圖" || fail "index content unexpected"
 
 # --- published wheel archive: every URL still serves its original bytes ---
 [ -f "$MANIFEST" ] || fail "wheel manifest not found: $MANIFEST"
-TMPD=$(mktemp -d)
-trap 'rm -rf "$TMPD"' EXIT
 COUNT=0
 CURRENT_LISTED=0
 while read -r want name || [ -n "${want:-}" ]; do
@@ -43,6 +45,7 @@ while read -r want name || [ -n "${want:-}" ]; do
   [ ${#want} -eq 64 ] || fail "malformed sha256 in $MANIFEST: $want"
   case "$want" in *[!0-9a-f]*) fail "malformed sha256 in $MANIFEST: $want" ;; esac
   curl -fsSL "$BASE/wheels/$name" -o "$TMPD/wheel.bin" || fail "published wheel $name not fetchable"
+  [ "$(head -c 2 "$TMPD/wheel.bin")" = "PK" ] || fail "published wheel $name is not served (Pages fallback body)"
   got=$(shasum -a 256 "$TMPD/wheel.bin" | cut -d' ' -f1)
   [ "$got" = "$want" ] || fail "published wheel $name changed: served $got, manifest says $want (published wheel URLs are immutable)"
   if [ "$name" = "$W" ]; then CURRENT_LISTED=1; fi

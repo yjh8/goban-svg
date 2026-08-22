@@ -35,7 +35,8 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
   `~/.gitconfig`, so `~/.ssh` / `~/.aws` / `~/.codex` are unreadable; command
   network disabled; environment inherited as `core` only with `*TOKEN*`-style
   names excluded; `--ignore-user-config`; `--strict-config`; detached; prompt on
-  stdin. Every clause probe-verified (r7–r10). Sharing `~/.codex` with
+  stdin. Every clause probe-verified (r7–r11). Known residual: global temp stays
+  readable via `:minimal` — don't leave secrets in `/tmp`. Sharing `~/.codex` with
   ChatGPT.app killed four long runs mid-flight on 2026-08-21.
 - New top-level files/dirs get a `## Repository layout` row in `README.md` in the same commit.
 - Transient artifacts go in `outputs/` (gitignored). Anything cited as a source of truth lives in `docs/` (tracked).

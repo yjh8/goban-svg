@@ -17,12 +17,13 @@
 #
 #   1. No second copy of the token exists: $CODEX_HOME/auth.json is a SYMLINK to
 #      ~/.codex/auth.json, so `codex login` propagates everywhere at once.
-#   2. A PERMISSION PROFILE denies the filesystem root and re-grants only what a
-#      review needs: the repo, the toolchain, and ~/.gitconfig. `~/.ssh`,
-#      `~/.aws`, and the original `~/.codex/auth.json` are "Operation not
-#      permitted" to anything the model runs — verified by probe, not assumed.
-#      This REPLACES `--sandbox read-only`, which bypasses default_permissions
-#      and left the whole home readable.
+#   2. A PERMISSION PROFILE denies the filesystem root and re-grants the repo,
+#      the toolchain, and ~/.gitconfig. `~/.ssh`, `~/.aws`, and the original
+#      `~/.codex/auth.json` are "Operation not permitted" to anything the model
+#      runs — verified by probe, not assumed. This REPLACES `--sandbox
+#      read-only`, which bypasses default_permissions and left the whole home
+#      readable. It is NOT a complete jail: see the temp-directory residual
+#      below, and treat reviewed repos and prompts as trusted input.
 #
 # The profile is default-DENY: a new toolchain path may need adding here (the
 # symptom is a review reporting a blocked command), which is the correct
@@ -56,8 +57,12 @@ EFFORT=${CODEX_REVIEW_EFFORT:-ultra}
 #   - /opt/homebrew/var is denied INSIDE the homebrew grant: it holds service
 #     data (postgres clusters, logs, caches), not toolchain. /opt/homebrew/etc
 #     stays readable because node loads openssl.cnf from it — config, not data.
-#   - /private/tmp is not granted at all: prompts are read by the PARENT
-#     process, never by a model command.
+#   - KNOWN RESIDUAL: global temp (/tmp, /private/tmp, /var/tmp) stays READABLE.
+#     `:minimal` grants it and per-path denies do NOT override that in codex
+#     0.144.1 — probed both orderings, neither worked (r11 B-3). So: do not
+#     leave secrets in /tmp on a machine that runs reviews. This wrapper no
+#     longer contributes to the exposure — its prompt spool moved to a 0700
+#     directory under ~/.codex-homes/ (which the profile denies).
 #   - ~/.gitconfig uses the literal ~ so a HOME containing a quote or backslash
 #     cannot break the TOML.
 PERM_FS="permissions.review-readonly.filesystem={\
@@ -96,8 +101,10 @@ PROMPT_SRC=$1
 OUT_ARG=${2:-}
 
 if [ "$PROMPT_SRC" = "-" ]; then
-  PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-prompt-XXXXXX")
-  trap 'rm -f "$PROMPT_FILE"' EXIT
+  SPOOL=$(mktemp -d "$HOME/.codex-homes/.spool-XXXXXX")
+  chmod 700 "$SPOOL"
+  PROMPT_FILE="$SPOOL/prompt.txt"
+  trap 'rm -rf "$SPOOL"' EXIT
   cat >"$PROMPT_FILE"
 else
   [ -f "$PROMPT_SRC" ] || { echo "prompt file not found: $PROMPT_SRC" >&2; exit 2; }

@@ -33,13 +33,37 @@ MANIFEST="$ARCHIVE/SHA256SUMS"
 
 sha256_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
+# Cloudflare Pages answers ANY missing path with HTTP 200 and the index.html
+# body (verified 2026-08-22), so status codes cannot tell "published" from
+# "absent" here. Fetch and identify by CONTENT: a real wheel is a zip ("PK").
+# Echoes the sha256 of a genuine wheel, or "ABSENT"; exits non-zero only on a
+# transport failure, which must never be read as either (r11).
+live_wheel_sha() {
+  local url=$1 tmp code
+  tmp=$(mktemp)
+  if ! code=$(curl -sS -L -o "$tmp" -w '%{http_code}' "$url"); then
+    rm -f "$tmp"; return 1
+  fi
+  if [ "$code" != "200" ] || [ "$(head -c 2 "$tmp")" != "PK" ]; then
+    rm -f "$tmp"; echo ABSENT; return 0
+  fi
+  sha256_of "$tmp"
+  rm -f "$tmp"
+}
+
 # Wheel filenames listed in the manifest, one per line (shasum format:
 # "<64 hex><spaces>[*]<name>").
 manifest_names() { sed -nE 's/^[0-9a-f]{64}[[:space:]]+[*]?(.+)$/\1/p' "$MANIFEST"; }
 manifest_count() { manifest_names | wc -l | tr -d ' '; }
 
 DEPLOY_MODE=0
-[ "${1:-}" = "--deploy" ] && DEPLOY_MODE=1
+REARCHIVE=0
+case "${1:-}" in
+  --deploy) DEPLOY_MODE=1 ;;
+  --rearchive) REARCHIVE=1 ;;
+  "") ;;
+  *) echo "usage: scripts/deploy-web.sh [--deploy|--rearchive]" >&2; exit 2 ;;
+esac
 LIVE_BASE="https://${PROJECT_NAME}.pages.dev"
 
 echo "== verify published wheel archive ($MANIFEST)"
@@ -102,19 +126,45 @@ echo "== wheel archive (published URLs are immutable)"
 FRESH_SHA=$(sha256_of "$WHEEL_PATH")
 if [ -f "$ARCHIVE/$WHEEL" ]; then
   ARCHIVED_SHA=$(sha256_of "$ARCHIVE/$WHEEL")
-  if [ "$FRESH_SHA" != "$ARCHIVED_SHA" ]; then
+  if [ "$FRESH_SHA" != "$ARCHIVED_SHA" ] && [ "$REARCHIVE" = 1 ]; then
+    # Re-archiving is legal ONLY for a wheel that was never served: prove it by
+    # asking the live site, and treat anything other than a clean 404 as "may be
+    # published" (r11 workflow trap).
+    echo "== --rearchive: confirming $WHEEL was never published"
+    if ! RA_SHA=$(live_wheel_sha "$LIVE_BASE/wheels/$WHEEL"); then
+      echo "cannot reach $LIVE_BASE to prove $WHEEL is unpublished — refusing to re-archive" >&2
+      exit 1
+    fi
+    [ "$RA_SHA" = "ABSENT" ] || {
+      echo "$LIVE_BASE/wheels/$WHEEL serves a real wheel ($RA_SHA) — it IS published; refusing to re-archive" >&2
+      echo "Bump the version instead: published wheel bytes are immutable." >&2
+      exit 1
+    }
+    cp "$WHEEL_PATH" "$ARCHIVE/$WHEEL"
+    ( cd "$ARCHIVE" && grep -v "  $WHEEL\$" SHA256SUMS > SHA256SUMS.tmp || true
+      shasum -a 256 "$WHEEL" >> SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS )
+    echo "   re-archived $WHEEL ($FRESH_SHA) — commit the wheel AND $MANIFEST"
+  elif [ "$FRESH_SHA" != "$ARCHIVED_SHA" ]; then
     {
       echo "published wheel bytes are immutable: $ARCHIVE/$WHEEL exists with DIFFERENT bytes"
       echo "  archived: $ARCHIVED_SHA"
       echo "  fresh:    $FRESH_SHA"
-      echo "The source changed without a version bump. Bump the version (pyproject.toml +"
-      echo "src/goban_svg/__init__.py + uv.lock) so the new build gets its own URL."
-      echo "If this archive entry was never published (its manifest line is not committed),"
-      echo "delete $ARCHIVE/$WHEEL, drop its $MANIFEST line, and re-run."
+      echo "The source changed without a version bump."
+      echo
+      echo "If $WHEEL is ALREADY PUBLISHED (live at $LIVE_BASE/wheels/$WHEEL):"
+      echo "  bump the version (pyproject.toml + src/goban_svg/__init__.py + uv.lock)"
+      echo "  so the new build gets its own URL. Published bytes never change."
+      echo
+      echo "If it was archived but NEVER published — the ordinary case when source"
+      echo "changes between archiving and deploying — re-archive it:"
+      echo "  scripts/deploy-web.sh --rearchive"
+      echo "  (that flag REFUSES unless the wheel 404s on the live site, so it can"
+      echo "   never rewrite bytes an integrator may have pinned.)"
     } >&2
     exit 1
+  else
+    echo "   $WHEEL already archived (bytes identical)"
   fi
-  echo "   $WHEEL already archived (bytes identical)"
 else
   if [ "$DEPLOY_MODE" = 1 ]; then
     {
@@ -190,7 +240,6 @@ if [ "$DEPLOY_MODE" = 1 ]; then
   # a new release; that must be committed too (r6 A-M2).
   require_clean_archive
   echo "== pre-deploy: verify live site against the published manifest"
-  PRE_TMP=$(mktemp)
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
     want=$(printf '%s' "$line" | cut -d' ' -f1)
@@ -198,43 +247,34 @@ if [ "$DEPLOY_MODE" = 1 ]; then
     [ -n "$name" ] || { echo "malformed manifest line: $line" >&2; exit 1; }
     # Transport failure and HTTP status are DIFFERENT things: a 500/403/DNS/TLS
     # error must never be waved through as "new release" (r6 B-2).
-    if ! code=$(curl -sS -L -o "$PRE_TMP" -w '%{http_code}' "$LIVE_BASE/wheels/$name"); then
+    if ! got=$(live_wheel_sha "$LIVE_BASE/wheels/$name"); then
       echo "LIVE $LIVE_BASE/wheels/$name — transport failure (DNS/TLS/timeout); refusing to deploy" >&2
       exit 1
     fi
-    case "$code" in
-      200)
-        got=$(sha256_of "$PRE_TMP")
-        [ "$got" = "$want" ] || {
-          echo "LIVE $name serves $got but the manifest pins $want — refusing to deploy over an inconsistent archive" >&2
-          exit 1
-        }
-        ;;
-      404)
-        # Legal ONLY for the wheel this run introduces, and only once the live
-        # site is proven to be serving a different (older) version.
-        [ "$name" = "$WHEEL" ] || {
-          echo "LIVE $name returned 404 but is a previously published wheel — refusing to deploy" >&2
-          exit 1
-        }
-        LIVE_CFG=$(curl -fsS "$LIVE_BASE/gen/config.js") || {
-          echo "cannot read the live gen/config.js to confirm $WHEEL is a new release — refusing to deploy" >&2
-          exit 1
-        }
-        LIVE_WHEEL=$(printf '%s' "$LIVE_CFG" | sed -nE 's/export const WHEEL = "([^"]+)".*/\1/p')
-        [ -n "$LIVE_WHEEL" ] && [ "$LIVE_WHEEL" != "$WHEEL" ] || {
-          echo "live config names '$LIVE_WHEEL' — $WHEEL is not a new release, yet its URL 404s; refusing to deploy" >&2
-          exit 1
-        }
-        echo "   $name not live yet (new release; live currently serves $LIVE_WHEEL) — OK"
-        ;;
-      *)
-        echo "LIVE $LIVE_BASE/wheels/$name returned HTTP $code — refusing to deploy" >&2
+    if [ "$got" = "ABSENT" ]; then
+      # Absent is legal ONLY for the wheel this run introduces, and only once the
+      # live site is proven to be serving a different (older) version.
+      [ "$name" = "$WHEEL" ] || {
+        echo "LIVE $name is not served but is a previously published wheel — refusing to deploy" >&2
         exit 1
-        ;;
-    esac
+      }
+      LIVE_CFG=$(curl -fsS "$LIVE_BASE/gen/config.js") || {
+        echo "cannot read the live gen/config.js to confirm $WHEEL is a new release — refusing to deploy" >&2
+        exit 1
+      }
+      LIVE_WHEEL=$(printf '%s' "$LIVE_CFG" | sed -nE 's/export const WHEEL = "([^"]+)".*/\1/p')
+      [ -n "$LIVE_WHEEL" ] && [ "$LIVE_WHEEL" != "$WHEEL" ] || {
+        echo "live config names '$LIVE_WHEEL' — $WHEEL is not a new release, yet it is not served; refusing to deploy" >&2
+        exit 1
+      }
+      echo "   $name not live yet (new release; live currently serves $LIVE_WHEEL) — OK"
+    else
+      [ "$got" = "$want" ] || {
+        echo "LIVE $name serves $got but the manifest pins $want — refusing to deploy over an inconsistent archive" >&2
+        exit 1
+      }
+    fi
   done <<< "$PREV_MANIFEST_CONTENT"
-  rm -f "$PRE_TMP"
   echo "== deploy to Cloudflare Pages (${PROJECT_NAME})"
   wrangler pages deploy web-dist --project-name "$PROJECT_NAME" --commit-dirty=true
   echo "== post-deploy smoke check"

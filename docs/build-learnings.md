@@ -41,6 +41,14 @@ false findings, and the toolchain grant denies `/opt/homebrew/var` (service
 data) while keeping `/opt/homebrew/etc` (node loads `openssl.cnf` from it — a
 first attempt denied both and broke node).
 
+One boundary is NOT closed, and saying so is the point: global temp
+(`/tmp`, `/private/tmp`, `/var/tmp`) remains readable because `:minimal` grants
+it and per-path denies do not override that in 0.144.1 — probed in both
+orderings. The wrapper stopped *contributing* (its prompt spool moved to a 0700
+dir the profile denies) and the docs now say "known residual" instead of
+implying a jail; the review had flagged the previous wording as an overclaim,
+which is its own lesson about writing security docs.
+
 Two lessons beyond the mechanism: **"that risk is inherent" is a claim to CHECK
 against current docs, not to assert** — the reviewer found a real mitigation
 shipping in the version already installed; and every tightening of a sandbox

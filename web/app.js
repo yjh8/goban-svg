@@ -43,6 +43,7 @@ let worker = null;
 let workerReady = false;
 let workerAttempts = 0;
 let workerGeneration = 0; // bumped per startWorker(); replies from older generations are dropped
+let busyNow = false; // last setBusy() value — an input to refreshControls (r11 B-4)
 let workerOccupied = false; // THE job invariant: set at enqueue, cleared only by a terminal reply
 let currentJob = 0;
 let currentJobKind = null; // 'convert' | 'photo' | 'photo-preview' | 'photo-commit' | 'rerender'
@@ -243,38 +244,29 @@ fileInput.addEventListener("change", () => {
   acceptFile(fileInput.files[0]);
 });
 
+/* A candidate image was rejected. The current session is untouched — say so, so
+ * the user is not left wondering what happened to their board (r11 B-2/B-6). */
+function rejectCandidate(mainZh, detail) {
+  showError(mainZh, detail);
+  setStatus(pendingRGB ? "已保留目前的圖片與盤面，未更換。" : "");
+}
+
 function looksHeic(file) {
   return /\.hei[cf]$/i.test(file.name) || /hei[cf]/i.test(file.type);
 }
 
+/* Decode a CANDIDATE image without touching the current session, then swap
+ * atomically only once it is known good (r11 B-2). A rejected file — too big,
+ * undecodable, too small — used to have already wiped the applied board,
+ * corrections and undo history by the time the error was shown. */
 async function acceptFile(file) {
   if (!intakeAllowed()) return; // the guard, again, at the function itself
   clearError();
-  pendingRGB = null;
-  decodedCanvas = null;
   selectionEpoch += 1; // invalidates every in-flight decode AND any staged preview
   const epoch = selectionEpoch;
-  photoInputRevision += 1;
-  $("result-section").hidden = true; // a previous image's result must not sit beside a new preview
-  resetEditorState();
-  // Photo UI resets FIRST: a failed decode must not leave a stale picker or
-  // an apparently-working photo link behind (review m6).
-  photoModeActive = false;
-  pickerCorners = null;
-  $("picker-section").hidden = true;
-  $("photo-mode-link").hidden = true;
-  $("monitor-hint-upload").hidden = true;
-  // Drop the OLD preview now: every validation/decode failure below returns
-  // early, which used to leave the previous image on screen beside a
-  // just-cleared state (r10 B-6).
-  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
-  $("preview").hidden = true;
-  $("preview").removeAttribute("src");
-  $("dropzone-text").textContent = "拖曳圖片到這裡，或點擊選擇檔案";
-  invalidatePreview("reselect");
-  updateConvertEnabled();
+  setStatus("讀取圖片中…");
   if (file.size > MAX_FILE_BYTES) {
-    showError("圖片檔案太大（上限 25 MB），請縮小後再試。", `${file.name}: ${(file.size / 1e6).toFixed(1)} MB`);
+    rejectCandidate("圖片檔案太大（上限 25 MB），請縮小後再試。", `${file.name}: ${(file.size / 1e6).toFixed(1)} MB`);
     return;
   }
   let bitmap;
@@ -285,13 +277,13 @@ async function acceptFile(file) {
     const hint = looksHeic(file)
       ? "此瀏覽器無法讀取 HEIC 格式，請改用 Safari，或先將照片轉成 JPEG。"
       : "無法讀取這個圖片檔，請確認格式（建議 PNG 或 JPEG）。";
-    showError(hint, String(err));
+    rejectCandidate(hint, String(err));
     return;
   }
   if (epoch !== selectionEpoch) { bitmap.close(); return; } // decode-race guard (review F6)
   const long = Math.max(bitmap.width, bitmap.height);
   if (long < MIN_LONG_EDGE) {
-    showError("圖片解析度太低，無法辨識棋盤（長邊至少 300 像素）。", `${bitmap.width}×${bitmap.height}`);
+    rejectCandidate("圖片解析度太低，無法辨識棋盤（長邊至少 300 像素）。", `${bitmap.width}×${bitmap.height}`);
     bitmap.close();
     return;
   }
@@ -300,6 +292,7 @@ async function acceptFile(file) {
   const h = Math.max(1, Math.round(bitmap.height * scale));
 
   let rgba;
+  let candidateCanvas;
   try {
     // Opaque black base = the same alpha policy as the CLI's PNG codec. This
     // canvas is KEPT: the corner picker must draw the exact raster pendingRGB
@@ -313,9 +306,9 @@ async function acceptFile(file) {
     ctx.drawImage(bitmap, 0, 0, w, h);
     rgba = ctx.getImageData(0, 0, w, h).data;
     if (epoch !== selectionEpoch) return;
-    decodedCanvas = canvas;
+    candidateCanvas = canvas;
   } catch (err) {
-    showError("圖片處理失敗，可能是尺寸或格式問題，請換一張圖片。", String(err));
+    rejectCandidate("圖片處理失敗，可能是尺寸或格式問題，請換一張圖片。", String(err));
     return;
   } finally {
     bitmap.close();
@@ -325,7 +318,19 @@ async function acceptFile(file) {
     rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
   }
   if (epoch !== selectionEpoch) return; // last check before state is committed
+
+  // ---- COMMIT: the candidate is good, so now (and only now) replace the
+  // session. Everything above this line left the previous board intact.
+  decodedCanvas = candidateCanvas;
   pendingRGB = { buf: rgb.buffer, width: w, height: h };
+  photoInputRevision += 1;
+  $("result-section").hidden = true;
+  resetEditorState();
+  photoModeActive = false;
+  pickerCorners = null;
+  $("picker-section").hidden = true;
+  $("monitor-hint-upload").hidden = false;
+  invalidatePreview("reselect");
 
   const preview = $("preview");
   if (previewUrl) URL.revokeObjectURL(previewUrl); // review M5: one live preview URL only
@@ -336,26 +341,28 @@ async function acceptFile(file) {
   $("original-img").src = previewUrl;
   $("thumb-img").src = previewUrl;
   $("photo-mode-link").hidden = false;
-  $("monitor-hint-upload").hidden = false;
   setStatus(workerReady ? "可以轉換了。" : "圖片已就緒，等待辨識引擎載入…");
   updateConvertEnabled();
 }
 
-function updateConvertEnabled() {
-  // Never while dirty: a fresh extraction replaces the textarea wholesale, so
-  // unapplied edits would vanish silently (r10 B-4).
-  convertBtn.disabled = !(workerReady && pendingRGB && !workerOccupied && !jsonDirty);
-}
+function updateConvertEnabled() { refreshControls(); }
 
 /* ---------------------------------------------------------------- convert */
 
-function setBusy(busy) {
-  // Editor controls follow the SAME predicate canRun() enforces, worker
-  // readiness included — otherwise a dead worker leaves buttons enabled and
-  // aria-disabled lying while every action is refused (r10 B-7).
-  const frozen = busy || jsonDirty || !workerReady;
-  convertBtn.disabled = busy || !(workerReady && pendingRGB);
-  $("rerender-btn").disabled = busy || !jsonDirty || !lastAppliedPosition;
+/* ONE derivation point for every control's disabled/frozen/ARIA state (r11 B-4).
+ * Callers change a FACT (busy, dirty, readiness, history, result) and then call
+ * this; nothing sets a `disabled` attribute on its own, so the UI can no longer
+ * disagree with what canRun()/canExtract() will actually permit. */
+function refreshControls() {
+  const busy = busyNow;
+  const ready = workerReady;
+  const haveBoard = !!lastAppliedPosition;
+  // "frozen" = an editing action would be refused by canRun().
+  const frozen = busy || jsonDirty || !ready || !haveBoard;
+
+  convertBtn.disabled = !canExtract();
+  $("rerender-btn").disabled = busy || !ready || !jsonDirty || !haveBoard;
+  $("discard-json-btn").disabled = busy || !jsonDirty || !haveBoard;
   // Freeze correction inputs during a run so a mid-flight edit can't be
   // silently overwritten by the returning result (review M3).
   $("json-editor").disabled = busy;
@@ -370,24 +377,34 @@ function setBusy(busy) {
   $("photo-size").disabled = busy;
   $("photo-mode-link").disabled = busy;
   $("photo-fallback-btn").disabled = busy;
-  $("checkpoint-accept").disabled = busy || !previewToken;
   $("checkpoint-retry").disabled = busy;
   $("undo-btn").disabled = frozen || history.length === 0;
-  for (const id of ["coord-empty", "coord-black", "coord-white"]) {
-    $(id).disabled = frozen || !lastAppliedPosition;
-  }
+  for (const id of ["coord-empty", "coord-black", "coord-white"]) $(id).disabled = frozen;
   $("coord-input").disabled = busy;
   for (const id of ["inspector-empty", "inspector-black", "inspector-white", "inspector-confirm", "inspector-unmark"]) {
     $(id).disabled = frozen;
   }
-  $("board-grid").setAttribute("aria-disabled", String(frozen || !lastAppliedPosition));
+  $("board-grid").setAttribute("aria-disabled", String(frozen));
   $("board-wrap").classList.toggle("frozen", frozen);
   refreshPhotoConvertEnabled();
 }
 
+function setBusy(busy) {
+  busyNow = busy;
+  refreshControls();
+  if (busy) setStatus("辨識棋盤中…（依裝置效能約需數秒）");
+}
+
 function refreshPhotoConvertEnabled() {
   const usable = pickerCorners && quadIsUsable(pickerCorners);
-  $("photo-convert-btn").disabled = workerOccupied || !workerReady || !pendingRGB || !usable;
+  // canExtract(): ONE predicate for every path that replaces the editor buffer
+  // wholesale — main convert, photo preview, checkpoint accept (r11 B-1).
+  $("photo-convert-btn").disabled = !canExtract() || !usable;
+  $("checkpoint-accept").disabled = !canExtract() || !previewToken;
+}
+
+function canExtract() {
+  return workerReady && !!pendingRGB && !workerOccupied && !jsonDirty;
 }
 
 convertBtn.addEventListener("click", () => {
@@ -1139,9 +1156,7 @@ function pushHistory(entry) {
   updateUndoButton();
 }
 
-function updateUndoButton() {
-  $("undo-btn").disabled = workerOccupied || jsonDirty || history.length === 0;
-}
+function updateUndoButton() { refreshControls(); }
 
 function undo() {
   if (!canRun("undo")) { blockedNotice(); return; }
@@ -1383,15 +1398,7 @@ function recomputeDirty() {
 function setDirty(value) {
   jsonDirty = value;
   $("dirty-badge").hidden = !value;
-  $("rerender-btn").disabled = workerOccupied || !value || !lastAppliedPosition;
-  $("discard-json-btn").disabled = workerOccupied || !value || !lastAppliedPosition;
-  updateUndoButton();
-  updateConvertEnabled(); // a dirty buffer blocks re-extraction (r10 B-4)
-  $("board-wrap").classList.toggle("frozen", value || workerOccupied);
-  $("board-grid").setAttribute("aria-disabled", String(value || workerOccupied || !lastAppliedPosition));
-  for (const id of ["coord-empty", "coord-black", "coord-white"]) {
-    $(id).disabled = value || workerOccupied || !lastAppliedPosition;
-  }
+  refreshControls();
   if (value) closeInspector();
 }
 
@@ -1469,7 +1476,7 @@ $("json-import").addEventListener("change", async (e) => {
   $("json-editor").value = text;
   settingEditor = false;
   jsonBufferRevision += 1;
-  setDirty(true); // an imported buffer is dirty until 套用修正 succeeds
+  recomputeDirty(); // identical content is NOT dirty (r11 B-5)
   e.target.value = ""; // let the same file be imported again after an edit
   setStatus("已匯入 JSON — 請按「套用修正並重新產生」。");
 });
@@ -1744,7 +1751,7 @@ function invalidatePreview(reason) {
 }
 
 $("photo-convert-btn").addEventListener("click", () => {
-  if (!pendingRGB || workerOccupied || !quadIsUsable(pickerCorners)) return;
+  if (!canExtract() || !quadIsUsable(pickerCorners)) { blockedNotice(); return; } // r11 B-1
   clearError();
   invalidatePreview("newer"); // the worker drops the old stage too, on the newer preview
   currentJob += 1;
@@ -1821,7 +1828,7 @@ function showCheckpoint(msg) {
     ? "自動微調完成 ✓（格線已依棋盤自動對齊）"
     : "自動微調無法確認格線，將依你點的角點辨識 ⚠";
   $("checkpoint-section").hidden = false;
-  $("checkpoint-accept").disabled = workerOccupied;
+  refreshControls(); // not a bare .disabled — one derivation point (r11 B-4)
   $("checkpoint-status").textContent = msg.refined
     ? "已產生拉正預覽，自動微調完成 — 請確認紅色格線是否對齊棋盤。"
     : "已產生拉正預覽，自動微調無法確認格線 — 請仔細確認紅色格線是否對齊棋盤。";
@@ -1831,7 +1838,7 @@ function showCheckpoint(msg) {
 }
 
 $("checkpoint-accept").addEventListener("click", () => {
-  if (workerOccupied || !previewToken) return;
+  if (!canExtract() || !previewToken) { blockedNotice(); return; } // r11 B-1
   if (previewEpoch !== selectionEpoch || previewRevision !== photoInputRevision) {
     showError("預覽已失效（圖片或角點已變更），請重新點角並再試一次。", "epoch/revision mismatch");
     invalidatePreview("stale");
