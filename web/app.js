@@ -267,6 +267,19 @@ function looksHeic(file) {
  * undecodable, too small — used to have already wiped the applied board,
  * corrections and undo history by the time the error was shown. */
 async function acceptFile(file) {
+  try {
+    await acceptFileInner(file);
+  } catch (err) {
+    // Any unexpected throw (e.g. the RGB allocation) must not strand the
+    // freeze flag and leave the UI permanently disabled (r14 B-4).
+    candidateDecoding = false;
+    refreshControls();
+    showError("圖片處理失敗，請換一張圖片再試。", String(err));
+    setStatus("");
+  }
+}
+
+async function acceptFileInner(file) {
   if (!intakeAllowed()) return; // the guard, again, at the function itself
   if (!workerDead) clearError(); // a dead engine's reload guidance must persist (r13 B-2)
   // A candidate attempt id — NOT the session epoch. Bumping the session epoch
@@ -276,6 +289,7 @@ async function acceptFile(file) {
   const attempt = candidateSeq;
   importSeq += 1; // any import still reading a file is now stale (r13 B-1)
   candidateDecoding = true;
+  cancelPickerDrag(); // a held pointer must not outlive the session (r14 B-3)
   refreshControls(); // freeze the OLD session while we decode (r12 B-2)
   setStatus("讀取圖片中…");
   if (file.size > MAX_FILE_BYTES) {
@@ -431,8 +445,34 @@ function canExtract() {
   return workerReady && !!pendingRGB && !workerOccupied && !jsonDirty && !candidateDecoding;
 }
 
+/* Re-running recognition on the SAME image throws away every correction, review
+ * decision and undo step, silently and irreversibly (r14 B-1). When work exists,
+ * the first press arms and explains; the second press proceeds. Any other action
+ * disarms, so the confirmation cannot go stale. */
+let reExtractArmed = false;
+
+function hasCorrections() {
+  return history.length > 0 || reviewPoints.some((r) => r.status !== "open");
+}
+
+function disarmReExtract() {
+  if (!reExtractArmed) return;
+  reExtractArmed = false;
+  convertBtn.textContent = "轉換成棋譜圖";
+}
+
+function confirmReExtraction() {
+  if (!hasCorrections() || reExtractArmed) { disarmReExtract(); return true; }
+  reExtractArmed = true;
+  convertBtn.textContent = "確定要重新辨識？（會清除修正）";
+  setStatus("重新辨識會清除你已做的修正與復原紀錄 — 再按一次確定，或先下載 JSON 保存。");
+  announceMutation("重新辨識會清除已做的修正，請再按一次確認。");
+  return false;
+}
+
 convertBtn.addEventListener("click", () => {
   if (!canExtract()) { blockedNotice(); return; } // ONE predicate (r12 A-1)
+  if (!confirmReExtraction()) return; // r14 B-1
   clearError();
   // The worker drops its stage on any convert; the CLIENT-side checkpoint must
   // die with it, or its Accept button would re-enable into a guaranteed
@@ -570,6 +610,7 @@ function handleJobResult(p) {
 }
 
 function resetEditorState() {
+  disarmReExtract();
   importSeq += 1;          // an import begun against the old board must not land
   jsonBufferRevision += 1;
   lastAppliedPosition = null;
@@ -951,6 +992,7 @@ function noteEditorMutation() {
 
 function beginTransaction(tx) {
   if (!canRun(tx.op)) { blockedNotice(); return false; }
+  disarmReExtract();
   noteEditorMutation();
   clearError();
   currentJob += 1;
@@ -1507,12 +1549,19 @@ $("json-import").addEventListener("change", async (e) => {
     setStatus("匯入已取消（JSON 內容在讀取期間已變更），請再匯入一次。");
     return;
   }
+  // Identical content changes nothing, so it must not invalidate a live photo
+  // checkpoint or tell the user to press a button that stays disabled (r14 B-2).
+  if (text === lastAppliedJson) {
+    e.target.value = "";
+    setStatus("匯入的 JSON 與目前盤面相同，不需要套用。");
+    return;
+  }
   noteEditorMutation(); // an imported buffer is editor state (r6 A-M1)
   settingEditor = true;
   $("json-editor").value = text;
   settingEditor = false;
   jsonBufferRevision += 1;
-  recomputeDirty(); // identical content is NOT dirty (r11 B-5)
+  recomputeDirty();
   e.target.value = ""; // let the same file be imported again after an edit
   setStatus("已匯入 JSON — 請按「套用修正並重新產生」。");
 });
@@ -1709,11 +1758,25 @@ pickerCanvas.addEventListener("pointerdown", (e) => {
 });
 pickerCanvas.addEventListener("pointermove", (e) => {
   if (dragIndex < 0 || e.pointerId !== activePointerId) return;
-  if (sessionFrozen()) { dragIndex = -1; activePointerId = null; return; } // drag cancelled by a decode
+  if (sessionFrozen()) { cancelPickerDrag(); return; } // r14 B-3
   pickerCorners[dragIndex] = clampToCanvas(pickerPointFromEvent(e));
   touchPhotoInput("corner");
   scheduleDraw();
 });
+/* Release capture, clear both fields, redraw. Called synchronously when a
+ * decode or job begins: leaving capture held meant endDrag() could never
+ * release it (it requires dragIndex >= 0), and a later captured move could
+ * dereference pickerCorners that commit had already nulled (r14 B-3). */
+function cancelPickerDrag() {
+  if (dragIndex < 0) return;
+  if (activePointerId !== null) {
+    try { pickerCanvas.releasePointerCapture(activePointerId); } catch { /* already gone */ }
+  }
+  dragIndex = -1;
+  activePointerId = null;
+  scheduleDraw();
+}
+
 const endDrag = (e) => {
   if (dragIndex >= 0 && e.pointerId === activePointerId) {
     try { pickerCanvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
@@ -1792,6 +1855,7 @@ function invalidatePreview(reason) {
 
 $("photo-convert-btn").addEventListener("click", () => {
   if (!canExtract() || !quadIsUsable(pickerCorners)) { blockedNotice(); return; } // r11 B-1
+  if (!confirmReExtraction()) return; // r14 B-1
   clearError();
   invalidatePreview("newer"); // the worker drops the old stage too, on the newer preview
   currentJob += 1;
