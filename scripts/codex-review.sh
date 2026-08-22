@@ -58,11 +58,22 @@ echo "== codex review: model=$MODEL effort=$EFFORT"
 echo "   CODEX_HOME=$HOME_DIR (project-local)"
 echo "   output=$OUT"
 
-CODEX_HOME="$HOME_DIR" setsid codex exec \
-  --sandbox read-only \
-  -c "model=\"$MODEL\"" \
-  -c "model_reasoning_effort=\"$EFFORT\"" \
-  "$PROMPT" </dev/null >"$OUT" 2>&1 &
-
-PID=$!
+# Detach via python3's start_new_session (macOS has no setsid): a new process
+# group + session means no supervising agent's task cleanup can reap the run,
+# and stdin is closed so codex never blocks on "Reading additional input…".
+PID=$(CODEX_HOME="$HOME_DIR" REVIEW_OUT="$OUT" REVIEW_MODEL="$MODEL" REVIEW_EFFORT="$EFFORT" \
+  python3 - "$PROMPT" <<'PY'
+import os, subprocess, sys
+out = open(os.environ["REVIEW_OUT"], "wb")
+p = subprocess.Popen(
+    ["codex", "exec", "--sandbox", "read-only",
+     "-c", f'model="{os.environ["REVIEW_MODEL"]}"',
+     "-c", f'model_reasoning_effort="{os.environ["REVIEW_EFFORT"]}"',
+     sys.argv[1]],
+    stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+    start_new_session=True,
+)
+print(p.pid)
+PY
+)
 echo "   detached pid=$PID — tail -f $OUT ; kill $PID to stop"
