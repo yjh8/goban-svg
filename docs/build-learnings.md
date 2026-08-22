@@ -31,9 +31,22 @@ filesystem profile makes `~/.ssh`, `~/.aws`, and the original `auth.json`
 "Operation not permitted" to anything the model runs, while the repo and
 toolchain stay readable — verified by probe, twice, including that `node`,
 `pytest` and `git` still work (git needs `~/.gitconfig` explicitly, or it fails
-with a bare "permission denied"). Lesson beyond the mechanism: "that risk is
-inherent" is a claim to CHECK against current docs, not to assert — the reviewer
-found a real mitigation shipping in the version already installed.
+with a bare "permission denied"). Round 6 closed the rest of the boundary:
+Codex 0.144.1 defaults to `inherit=all` with name-based excludes OFF, so every
+exported `*_TOKEN`/`*_KEY` in the launching shell was readable by a model
+command via `env` — proved with a canary variable. The policy is now
+`inherit="core"` + excludes on, command network off, `--strict-config` so a
+malformed `-c` fails loudly instead of degrading into a review that reports
+false findings, and the toolchain grant denies `/opt/homebrew/var` (service
+data) while keeping `/opt/homebrew/etc` (node loads `openssl.cnf` from it — a
+first attempt denied both and broke node).
+
+Two lessons beyond the mechanism: **"that risk is inherent" is a claim to CHECK
+against current docs, not to assert** — the reviewer found a real mitigation
+shipping in the version already installed; and every tightening of a sandbox
+needs a PROBE to discover what it broke, because the failure mode of a
+too-strict profile is a review that silently cannot run its own verification
+commands.
 
 Diagnostic order for a review that dies for no reason:
 (1) grep the output for `failed to renew cache TTL`, (2) check whether a session
