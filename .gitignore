@@ -20,3 +20,9 @@ __pycache__/
 # --- Web deploy staging (rebuilt by scripts/deploy-web.sh) ---
 /web-dist/
 /.wrangler/
+
+# --- Per-project Codex state (holds auth.json — NEVER commit) ---
+# scripts/codex-review.sh runs every review against this isolated CODEX_HOME so
+# ChatGPT.app's embedded codex cannot rewrite the cache out from under a run
+# (docs/build-learnings.md 2026-08-21).
+/.codex-home/

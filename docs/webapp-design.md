@@ -108,7 +108,7 @@ scripts/deploy-web.sh   # uv build → copy wheel → wrangler pages deploy web/
 6. **Verification UI**: web renders use `render_svg(coords=True)`; mobile gets a
    full-width 原圖/棋譜圖 toggle instead of two narrow columns; warnings name points that
    are now findable via the coordinate labels.
-7. **Testing**: Chrome E2E via browser automation against the three real fixtures
+7. **Testing**: Chrome E2E via browser automation against the real screenshot fixtures
    (upload → summary + SVG + downloads + JSON re-render), a deployed smoke check
    (headers, wheel fetch, boot), and staff-device acceptance for Safari/mobile.
    Full Playwright matrix deferred — recorded as a deliberate phase-1 gap.

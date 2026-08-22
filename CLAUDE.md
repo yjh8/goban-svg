@@ -26,7 +26,12 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
 
 - **Python via `uv`** (fleet standard): `uv init` / `uv add <pkg>` / `uv run` — never pip/venv/poetry.
 - **Commit + push to `main` as one motion** — this repo is NOT PR-gated.
-- **Codex `xhigh` review gate** applies to any substantive code or design change before it lands (docs-only edits exempt).
+- **Codex `ultra` review gate** (gpt-5.6-sol) applies to any substantive code or design
+  change before it lands (docs-only edits exempt). **Always run it via
+  `scripts/codex-review.sh`** — it uses a project-local `CODEX_HOME`
+  (`.codex-home/`, gitignored) and detaches the process. Sharing `~/.codex` with
+  ChatGPT.app killed four long runs mid-flight on 2026-08-21; the wrapper also
+  closes stdin, the other silent-death mode.
 - New top-level files/dirs get a `## Repository layout` row in `README.md` in the same commit.
 - Transient artifacts go in `outputs/` (gitignored). Anything cited as a source of truth lives in `docs/` (tracked).
 

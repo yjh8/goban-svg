@@ -3,6 +3,25 @@
 > What actually went wrong (failure modes, not just fixes), so the next session doesn't
 > rediscover them. Newest first.
 
+## Codex reviews need a PROJECT-LOCAL CODEX_HOME (2026-08-21/22)
+
+Four consecutive ultra code reviews died mid-flight (40 min, 4 min, 30 min, ~2 min)
+and were reported as "stopped/killed" — no API error, memory at 50% free, jetsam
+logs clean. Cause: every codex surface on the Mac (Homebrew CLI, ChatGPT.app's
+embedded codex, Codex Computer Use) shares `~/.codex`. Once the app started
+rewriting `models_cache.json` in a newer schema, the CLI's periodic cache-TTL
+renewal failed — `ERROR codex_models_manager::manager: failed to renew cache TTL:
+missing field 'base_instructions'` repeated in the output right before each death.
+A fifth run survived only when both isolated AND detached.
+
+Standing fix: `scripts/codex-review.sh` — project-local `CODEX_HOME=.codex-home/`
+(gitignored, seeded from `~/.codex`), `setsid` so no supervising agent's cleanup
+can reap it, stdin closed. Diagnostic order for a review that dies for no reason:
+(1) grep the output for `failed to renew cache TTL`, (2) check whether a session
+file was ever created (absent = the stdin hang instead), (3) only then suspect
+quotas or memory. Note: there is NO one-ultra-at-a-time limit and no subagent cap —
+concurrent reviews just share the subscription's rolling usage budget.
+
 ## Author CSS silently defeats [hidden] (2026-08-21)
 
 `button, .btn { display: inline-block }` — an ordinary author rule — beats the

@@ -70,6 +70,7 @@ let lastGeom = null; // {cell, originX, originY} from the SAME render as the SVG
 let boardSize = 0;
 let editorRevision = 0; // bumped on every successful Apply / new extraction
 let jsonBufferRevision = 0; // bumped on EVERY textarea-buffer change (r5 M7)
+let importSeq = 0; // one ticket per JSON import; only the newest may land (r6 A-M7)
 let jsonDirty = false; // the textarea is a dirty buffer: board editing pauses
 let originalWarnings = []; // immutable: exact strings, exact order
 let reviewPoints = []; // [{id, warningIndex, point, kind, status}]
@@ -826,7 +827,9 @@ function updateZoom() {
   // the cell itself must reach 44/0.84 ≈ 52 px for a true 44 px target — zooming
   // the cell to only 44 px left a 37 px target (code review r5 M5).
   const scale = Math.max(2, MIN_TOUCH_PX / (2 * HIT_RADIUS_CELLS) / Math.max(cellCssPx, 1));
-  wrap.style.setProperty("--edit-zoom", String(Math.round(scale * 100) / 100));
+  // CEIL, never round: rounding to 0.01 could round DOWN and land just under the
+  // 44 px target (a 360 px 19-board gave 43.93 px — r6 B-M5).
+  wrap.style.setProperty("--edit-zoom", String(Math.ceil(scale * 100) / 100));
 }
 
 $("edit-zoom-btn").addEventListener("click", () => {
@@ -836,9 +839,15 @@ $("edit-zoom-btn").addEventListener("click", () => {
   $("board-zoom").classList.toggle("zoomed", editZoom);
   updateZoom();
   renderOverlay();
+  requestAnimationFrame(positionInspector); // after the new width lands (r6 B-3)
 });
 
-window.addEventListener("resize", () => { if (lastGeom) { updateZoom(); updateCursorCell(false); } });
+window.addEventListener("resize", () => {
+  if (!lastGeom) return;
+  updateZoom();
+  updateCursorCell(false);
+  requestAnimationFrame(positionInspector);
+});
 
 /* ------------------------------------------------------------ transactions */
 
@@ -862,12 +871,18 @@ function blockedNotice() {
   if (!workerReady) setStatus("辨識引擎尚未就緒，請稍候再修正。");
 }
 
+/* A live photo checkpoint must not survive ANY editor-state mutation: committing
+ * it later runs handlePayload(reset:true), which would silently replace the
+ * user's edits, imported JSON, or review decisions (r5 M1; r6 A-M1 widened this
+ * to every path). Cheap to call anywhere — invalidatePreview() early-returns
+ * when nothing is staged. */
+function noteEditorMutation() {
+  invalidatePreview("editor-mutation");
+}
+
 function beginTransaction(tx) {
   if (!canRun(tx.op)) { blockedNotice(); return false; }
-  // A live photo checkpoint must not survive an editor mutation: accepting it
-  // later would silently replace the edits (code review r5 M1). The worker
-  // clears its stage on rerender too — this is the client half.
-  invalidatePreview("editor-mutation");
+  noteEditorMutation();
   clearError();
   currentJob += 1;
   currentJobKind = "rerender";
@@ -1062,7 +1077,7 @@ function removeMarkAt(notation) {
  * still a history step, with the same review inverse every other entry carries. */
 function confirmReviewAt(notation) {
   if (!canRun("stone")) { blockedNotice(); return; }
-  invalidatePreview("editor-mutation"); // same rule as beginTransaction (r5 M1)
+  noteEditorMutation();
   const ids = openReviewsAt(notation).filter((r) => CLASSIFICATION_KINDS.has(r.kind)).map((r) => r.id);
   if (!ids.length) return;
   const entry = { op: "review", point: notation, reviewInverse: reviewSnapshot(ids) };
@@ -1101,6 +1116,9 @@ function updateUndoButton() {
 function undo() {
   if (!canRun("undo")) { blockedNotice(); return; }
   closeInspector(); // an open popover would otherwise display pre-undo state
+  // Covers the review-only branch below, which returns before beginTransaction
+  // ever runs (r6 A-M1).
+  noteEditorMutation();
   const top = history[history.length - 1];
   if (!top) return;
   const entry = top.entry;
@@ -1225,24 +1243,30 @@ function openInspector(notation) {
   $("inspector-unmark").hidden = !markAt.has(notation);
   $("inspector-unmark").setAttribute("aria-label", `移除 ${notation} 的記號`);
 
-  // Clamped with the dialog's MEASURED size (after unhiding), so its edges can
-  // never leave the board box on narrow screens (code review r5 M4 — a center
-  // clamped to 12% puts an 88%-wide dialog's left edge at −32%).
   box.hidden = false;
-  const pct = pointPercent(notation, 0, lastGeom ? lastGeom.cell * 0.6 : 0);
-  if (pct) {
-    const wrap = $("board-wrap");
-    const ww = wrap.clientWidth;
-    const wh = wrap.clientHeight;
-    const bw = box.offsetWidth;
-    const bh = box.offsetHeight;
-    const half = bw / 2 + 4;
-    const cx = Math.min(Math.max((pct.left / 100) * ww, half), Math.max(ww - half, half));
-    const ty = Math.min(Math.max((pct.top / 100) * wh, 4), Math.max(wh - bh - 4, 4));
-    box.style.setProperty("left", `${cx}px`);
-    box.style.setProperty("top", `${ty}px`);
-  }
+  positionInspector();
   $("inspector-black").focus();
+}
+
+/* Clamp with the dialog's MEASURED size against #board-wrap, so its edges can
+ * never leave the board box (r5 M4 — a center clamped to 12% puts an 88%-wide
+ * dialog's left edge at −32%). Re-run on every layout change: edit-zoom and
+ * window resizes alter board-wrap's size, which would otherwise strand an open,
+ * focused dialog offscreen (r6 B-3). */
+function positionInspector() {
+  const box = $("inspector");
+  if (box.hidden || !inspectorPoint || !lastGeom) return;
+  const pct = pointPercent(inspectorPoint, 0, lastGeom.cell * 0.6);
+  if (!pct) return;
+  const wrap = $("board-wrap");
+  const ww = wrap.clientWidth;
+  const wh = wrap.clientHeight;
+  const half = box.offsetWidth / 2 + 4;
+  const bh = box.offsetHeight;
+  const cx = Math.min(Math.max((pct.left / 100) * ww, half), Math.max(ww - half, half));
+  const ty = Math.min(Math.max((pct.top / 100) * wh, 4), Math.max(wh - bh - 4, 4));
+  box.style.setProperty("left", `${cx}px`);
+  box.style.setProperty("top", `${ty}px`);
 }
 
 function closeInspector(returnFocus) {
@@ -1278,7 +1302,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("insp
 function coordAction(color) {
   const parsed = parseNotation($("coord-input").value);
   if (!parsed) {
-    setStatus("座標格式有誤 — 請輸入像 K8 這樣的座標（直行 A–T 略過 I）。");
+    setStatus("座標格式有誤 — 請輸入像 K8 這樣的座標（直行由 A 起算、略過 I）。");
     announceMutation("座標格式有誤。");
     return;
   }
@@ -1293,7 +1317,7 @@ $("coord-input").addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   e.preventDefault();
   const parsed = parseNotation($("coord-input").value);
-  if (!parsed) { setStatus("座標格式有誤 — 請輸入像 K8 這樣的座標（直行 A–T 略過 I）。"); return; }
+  if (!parsed) { setStatus("座標格式有誤 — 請輸入像 K8 這樣的座標（直行由 A 起算、略過 I）。"); return; }
   setCursor(parsed.notation, true);
   if (openReviewsAt(parsed.notation).length) openInspector(parsed.notation);
 });
@@ -1326,6 +1350,7 @@ function setDirty(value) {
 $("json-editor").addEventListener("input", () => {
   if (settingEditor) return;
   jsonBufferRevision += 1;
+  noteEditorMutation(); // typed text is editor state a commit would overwrite
   setDirty(true);
 });
 
@@ -1362,11 +1387,16 @@ $("json-import").addEventListener("change", async (e) => {
   }
   const epoch = selectionEpoch;
   const bufferRev = jsonBufferRevision;
+  // Ticket for THIS import. Two concurrent imports capture the same buffer
+  // revision, so the buffer check alone let whichever finished FIRST win and
+  // then rejected the newer selection (r6 A-M7). The newest import always wins.
+  importSeq += 1;
+  const myImport = importSeq;
   const text = await file.text();
-  // Re-guard after the await: a new image, a running job, OR any buffer change
-  // (newer import / manual typing) since the read started must win over this
-  // slow import (r5 M7).
+  // Re-guard after the await: a new image, a running job, a NEWER import, or
+  // manual typing since the read started must all win over this slow import.
   if (epoch !== selectionEpoch) { e.target.value = ""; return; }
+  if (myImport !== importSeq) { e.target.value = ""; return; } // superseded, silently
   if (workerOccupied) {
     e.target.value = "";
     setStatus("匯入已取消（辨識進行中），請稍後再匯入一次。");
@@ -1377,6 +1407,7 @@ $("json-import").addEventListener("change", async (e) => {
     setStatus("匯入已取消（JSON 內容在讀取期間已變更），請再匯入一次。");
     return;
   }
+  noteEditorMutation(); // an imported buffer is editor state (r6 A-M1)
   settingEditor = true;
   $("json-editor").value = text;
   settingEditor = false;

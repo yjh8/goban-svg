@@ -44,17 +44,29 @@ LIVE_BASE="https://${PROJECT_NAME}.pages.dev"
 
 echo "== verify published wheel archive ($MANIFEST)"
 [ -f "$MANIFEST" ] || { echo "missing $MANIFEST — the wheel manifest is tracked; restore it from git" >&2; exit 1; }
-# A mutable local manifest is not an immutability record (code review r5 M2):
-# deploys require the archive + manifest to be committed and clean, so history
-# is durable BEFORE bytes go public. (Stage-only runs skip this for dev loops.)
-if [ "$DEPLOY_MODE" = 1 ]; then
-  DIRTY=$(git status --porcelain -- "$ARCHIVE" 2>/dev/null || true)
-  if [ -n "$DIRTY" ]; then
-    echo "refusing to deploy: $ARCHIVE has uncommitted changes — commit the archive + manifest first:" >&2
-    echo "$DIRTY" >&2
+# A mutable local manifest is not an immutability record (r5 M2). Deploys require
+# the archive + manifest to be COMMITTED and clean, so published history is
+# durable before bytes go public. Checked here AND again after the build, because
+# a new release archives a wheel between the two points (r6 A-M2).
+# `git status` failure must abort, not read as "clean" (r6 B-4).
+require_clean_archive() {
+  local dirty
+  if ! dirty=$(git status --porcelain -- "$ARCHIVE"); then
+    echo "git status failed for $ARCHIVE — cannot verify the archive is committed" >&2
     exit 1
   fi
-fi
+  if [ -n "$dirty" ]; then
+    {
+      echo "refusing to deploy: $ARCHIVE has uncommitted changes:"
+      echo "$dirty"
+      echo
+      echo "Release flow: run scripts/deploy-web.sh (stage only) to build + archive the"
+      echo "wheel, commit BOTH the wheel and $MANIFEST, then re-run with --deploy."
+    } >&2
+    exit 1
+  fi
+}
+[ "$DEPLOY_MODE" = 1 ] && require_clean_archive
 # Snapshot the manifest BEFORE any append this run may do: these are the
 # already-published entries the live site must still serve byte-identically.
 PREV_MANIFEST_CONTENT=$(cat "$MANIFEST")
@@ -104,6 +116,15 @@ if [ -f "$ARCHIVE/$WHEEL" ]; then
   fi
   echo "   $WHEEL already archived (bytes identical)"
 else
+  if [ "$DEPLOY_MODE" = 1 ]; then
+    {
+      echo "refusing to deploy: $WHEEL is not in the published archive yet."
+      echo "A wheel must be committed BEFORE it is published, so the immutability"
+      echo "record exists first. Run scripts/deploy-web.sh (stage only) to archive it,"
+      echo "commit $ARCHIVE/$WHEEL + $MANIFEST, then re-run with --deploy."
+    } >&2
+    exit 1
+  fi
   cp "$WHEEL_PATH" "$ARCHIVE/$WHEEL"
   [ -z "$(tail -c 1 "$MANIFEST")" ] || printf '\n' >>"$MANIFEST"
   (cd "$ARCHIVE" && shasum -a 256 "$WHEEL" >>SHA256SUMS)
@@ -165,6 +186,9 @@ if [ "$DEPLOY_MODE" = 1 ]; then
   # Pre-deploy cross-check against the LIVE site (r5 M2): every wheel that was
   # in the manifest before this run must still be served byte-identically. A
   # 404 is legal ONLY for the freshly built current wheel (a new release).
+  # The archive gained a wheel + manifest line since the first check if this is
+  # a new release; that must be committed too (r6 A-M2).
+  require_clean_archive
   echo "== pre-deploy: verify live site against the published manifest"
   PRE_TMP=$(mktemp)
   while IFS= read -r line || [ -n "$line" ]; do
@@ -172,19 +196,43 @@ if [ "$DEPLOY_MODE" = 1 ]; then
     want=$(printf '%s' "$line" | cut -d' ' -f1)
     name=$(printf '%s' "$line" | sed -nE 's/^[0-9a-f]{64}[[:space:]]+[*]?(.+)$/\1/p')
     [ -n "$name" ] || { echo "malformed manifest line: $line" >&2; exit 1; }
-    if curl -fsSL "$LIVE_BASE/wheels/$name" -o "$PRE_TMP" 2>/dev/null; then
-      got=$(sha256_of "$PRE_TMP")
-      [ "$got" = "$want" ] || {
-        echo "LIVE $name serves $got but the manifest pins $want — refusing to deploy over an inconsistent archive" >&2
-        exit 1
-      }
-    else
-      [ "$name" = "$WHEEL" ] || {
-        echo "LIVE $LIVE_BASE/wheels/$name is unreachable but is a previously published wheel — refusing to deploy" >&2
-        exit 1
-      }
-      echo "   $name not live yet (new release) — OK"
+    # Transport failure and HTTP status are DIFFERENT things: a 500/403/DNS/TLS
+    # error must never be waved through as "new release" (r6 B-2).
+    if ! code=$(curl -sS -L -o "$PRE_TMP" -w '%{http_code}' "$LIVE_BASE/wheels/$name"); then
+      echo "LIVE $LIVE_BASE/wheels/$name — transport failure (DNS/TLS/timeout); refusing to deploy" >&2
+      exit 1
     fi
+    case "$code" in
+      200)
+        got=$(sha256_of "$PRE_TMP")
+        [ "$got" = "$want" ] || {
+          echo "LIVE $name serves $got but the manifest pins $want — refusing to deploy over an inconsistent archive" >&2
+          exit 1
+        }
+        ;;
+      404)
+        # Legal ONLY for the wheel this run introduces, and only once the live
+        # site is proven to be serving a different (older) version.
+        [ "$name" = "$WHEEL" ] || {
+          echo "LIVE $name returned 404 but is a previously published wheel — refusing to deploy" >&2
+          exit 1
+        }
+        LIVE_CFG=$(curl -fsS "$LIVE_BASE/gen/config.js") || {
+          echo "cannot read the live gen/config.js to confirm $WHEEL is a new release — refusing to deploy" >&2
+          exit 1
+        }
+        LIVE_WHEEL=$(printf '%s' "$LIVE_CFG" | sed -nE 's/export const WHEEL = "([^"]+)".*/\1/p')
+        [ -n "$LIVE_WHEEL" ] && [ "$LIVE_WHEEL" != "$WHEEL" ] || {
+          echo "live config names '$LIVE_WHEEL' — $WHEEL is not a new release, yet its URL 404s; refusing to deploy" >&2
+          exit 1
+        }
+        echo "   $name not live yet (new release; live currently serves $LIVE_WHEEL) — OK"
+        ;;
+      *)
+        echo "LIVE $LIVE_BASE/wheels/$name returned HTTP $code — refusing to deploy" >&2
+        exit 1
+        ;;
+    esac
   done <<< "$PREV_MANIFEST_CONTENT"
   rm -f "$PRE_TMP"
   echo "== deploy to Cloudflare Pages (${PROJECT_NAME})"
