@@ -50,7 +50,10 @@ let currentJobKind = null; // 'convert' | 'photo' | 'photo-preview' | 'photo-com
 let pendingRGB = null; // {buf, width, height}
 let blobUrls = [];
 let previewUrl = null;
-let selectionEpoch = 0; // bumped on every acceptFile — binds decodes and jobs to ONE selection
+let selectionEpoch = 0; // bumped only when a candidate COMMITS — the live session's identity
+let candidateSeq = 0; // bumped when a candidate decode STARTS — newest attempt wins
+let candidateDecoding = false; // a decode is in flight: freeze the old session's editing
+let workerDead = false; // retries exhausted — its guidance must not be overwritten (r12 B-6)
 let photoInputRevision = 0; // bumped on ANY corner nudge, size change or reselect
 
 let photoModeActive = false; // last successful result came from photo mode
@@ -119,6 +122,7 @@ function onWorkerMessage(event) {
   if (msg.type === "boot-progress") { if (!workerReady) setStatus(bootStages[msg.stage] || "載入中…"); return; }
   if (msg.type === "ready") {
     workerReady = true;
+    workerDead = false;
     workerAttempts = 0;
     setStatus("辨識引擎已就緒。");
     $("version-line").textContent = `goban-svg v${msg.appVersion} · Pyodide ${msg.pyodideVersion}`;
@@ -161,6 +165,7 @@ function workerFailed(detail) {
     setStatus("辨識引擎載入異常，正在重試…");
     startWorker();
   } else {
+    workerDead = true;
     setStatus("");
     showError("辨識引擎載入失敗，請重新整理頁面再試一次。", detail);
   }
@@ -247,6 +252,8 @@ fileInput.addEventListener("change", () => {
 /* A candidate image was rejected. The current session is untouched — say so, so
  * the user is not left wondering what happened to their board (r11 B-2/B-6). */
 function rejectCandidate(mainZh, detail) {
+  candidateDecoding = false;
+  refreshControls(); // the old session is unfrozen — it was never replaced
   showError(mainZh, detail);
   setStatus(pendingRGB ? "已保留目前的圖片與盤面，未更換。" : "");
 }
@@ -262,8 +269,13 @@ function looksHeic(file) {
 async function acceptFile(file) {
   if (!intakeAllowed()) return; // the guard, again, at the function itself
   clearError();
-  selectionEpoch += 1; // invalidates every in-flight decode AND any staged preview
-  const epoch = selectionEpoch;
+  // A candidate attempt id — NOT the session epoch. Bumping the session epoch
+  // here would destroy a live checkpoint before we know the file is even
+  // usable (r12 B-4); only a successful commit changes the session.
+  candidateSeq += 1;
+  const attempt = candidateSeq;
+  candidateDecoding = true;
+  refreshControls(); // freeze the OLD session while we decode (r12 B-2)
   setStatus("讀取圖片中…");
   if (file.size > MAX_FILE_BYTES) {
     rejectCandidate("圖片檔案太大（上限 25 MB），請縮小後再試。", `${file.name}: ${(file.size / 1e6).toFixed(1)} MB`);
@@ -273,14 +285,14 @@ async function acceptFile(file) {
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch (err) {
-    if (epoch !== selectionEpoch) return; // a newer selection won while we decoded
+    if (attempt !== candidateSeq) return; // a newer selection won while we decoded
     const hint = looksHeic(file)
       ? "此瀏覽器無法讀取 HEIC 格式，請改用 Safari，或先將照片轉成 JPEG。"
       : "無法讀取這個圖片檔，請確認格式（建議 PNG 或 JPEG）。";
     rejectCandidate(hint, String(err));
     return;
   }
-  if (epoch !== selectionEpoch) { bitmap.close(); return; } // decode-race guard (review F6)
+  if (attempt !== candidateSeq) { bitmap.close(); return; } // decode-race guard (review F6)
   const long = Math.max(bitmap.width, bitmap.height);
   if (long < MIN_LONG_EDGE) {
     rejectCandidate("圖片解析度太低，無法辨識棋盤（長邊至少 300 像素）。", `${bitmap.width}×${bitmap.height}`);
@@ -305,7 +317,7 @@ async function acceptFile(file) {
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(bitmap, 0, 0, w, h);
     rgba = ctx.getImageData(0, 0, w, h).data;
-    if (epoch !== selectionEpoch) return;
+    if (attempt !== candidateSeq) return;
     candidateCanvas = canvas;
   } catch (err) {
     rejectCandidate("圖片處理失敗，可能是尺寸或格式問題，請換一張圖片。", String(err));
@@ -317,10 +329,16 @@ async function acceptFile(file) {
   for (let i = 0, j = 0; j < rgb.length; i += 4, j += 3) {
     rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
   }
-  if (epoch !== selectionEpoch) return; // last check before state is committed
+  if (attempt !== candidateSeq) return; // last check before state is committed
 
   // ---- COMMIT: the candidate is good, so now (and only now) replace the
   // session. Everything above this line left the previous board intact.
+  selectionEpoch += 1;      // the session's identity changes HERE
+  currentJob += 1;          // any job still in flight for the old image is void
+  importSeq += 1;           // ...and so is any JSON import begun against it
+  jsonBufferRevision += 1;
+  pendingTx = null;
+  candidateDecoding = false;
   decodedCanvas = candidateCanvas;
   pendingRGB = { buf: rgb.buffer, width: w, height: h };
   photoInputRevision += 1;
@@ -341,7 +359,9 @@ async function acceptFile(file) {
   $("original-img").src = previewUrl;
   $("thumb-img").src = previewUrl;
   $("photo-mode-link").hidden = false;
-  setStatus(workerReady ? "可以轉換了。" : "圖片已就緒，等待辨識引擎載入…");
+  setStatus(workerReady ? "可以轉換了。" : workerDead
+    ? "辨識引擎已停止，請重新整理頁面。"
+    : "圖片已就緒，等待辨識引擎載入…");
   updateConvertEnabled();
 }
 
@@ -354,7 +374,7 @@ function updateConvertEnabled() { refreshControls(); }
  * this; nothing sets a `disabled` attribute on its own, so the UI can no longer
  * disagree with what canRun()/canExtract() will actually permit. */
 function refreshControls() {
-  const busy = busyNow;
+  const busy = busyNow || candidateDecoding; // a decode owns the session too (r12 B-2)
   const ready = workerReady;
   const haveBoard = !!lastAppliedPosition;
   // "frozen" = an editing action would be refused by canRun().
@@ -368,10 +388,13 @@ function refreshControls() {
   $("json-editor").disabled = busy;
   $("json-import").disabled = busy;
   // File intake joins the busy freeze (review F6): at most one transferred
-  // source buffer is ever in flight.
-  fileInput.disabled = busy;
-  dropzone.classList.toggle("busy", busy);
-  dropzone.setAttribute("aria-disabled", String(busy));
+  // source buffer is ever in flight. A newer FILE CHOICE stays possible during a
+  // candidate decode (it supersedes), but not while a worker job runs; the
+  // dirty block is surfaced to AT as well, not just enforced in code (r12 B-7).
+  const intakeBlocked = busyNow || jsonDirty;
+  fileInput.disabled = intakeBlocked;
+  dropzone.classList.toggle("busy", intakeBlocked);
+  dropzone.setAttribute("aria-disabled", String(intakeBlocked));
   // Photo controls are part of the same machine (picker review M2): a running
   // job freezes corner/size mutation so the picker always shows what was sent.
   $("photo-size").disabled = busy;
@@ -386,7 +409,11 @@ function refreshControls() {
   }
   $("board-grid").setAttribute("aria-disabled", String(frozen));
   $("board-wrap").classList.toggle("frozen", frozen);
-  refreshPhotoConvertEnabled();
+  // canExtract(): ONE predicate for every path that replaces the editor buffer
+  // wholesale — main convert, photo preview, checkpoint accept (r11 B-1).
+  const usable = pickerCorners && quadIsUsable(pickerCorners);
+  $("photo-convert-btn").disabled = !canExtract() || !usable;
+  $("checkpoint-accept").disabled = !canExtract() || !previewToken;
 }
 
 function setBusy(busy) {
@@ -395,21 +422,16 @@ function setBusy(busy) {
   if (busy) setStatus("辨識棋盤中…（依裝置效能約需數秒）");
 }
 
-function refreshPhotoConvertEnabled() {
-  const usable = pickerCorners && quadIsUsable(pickerCorners);
-  // canExtract(): ONE predicate for every path that replaces the editor buffer
-  // wholesale — main convert, photo preview, checkpoint accept (r11 B-1).
-  $("photo-convert-btn").disabled = !canExtract() || !usable;
-  $("checkpoint-accept").disabled = !canExtract() || !previewToken;
-}
+// Kept as a name for call sites that only changed corner validity; the state
+// itself is derived in refreshControls, which owns every .disabled (r12 A-4).
+function refreshPhotoConvertEnabled() { refreshControls(); }
 
 function canExtract() {
-  return workerReady && !!pendingRGB && !workerOccupied && !jsonDirty;
+  return workerReady && !!pendingRGB && !workerOccupied && !jsonDirty && !candidateDecoding;
 }
 
 convertBtn.addEventListener("click", () => {
-  if (!pendingRGB || workerOccupied) return; // review M2: state gate, not just the DOM attribute
-  if (jsonDirty) { blockedNotice(); return; } // r10 B-4
+  if (!canExtract()) { blockedNotice(); return; } // ONE predicate (r12 A-1)
   clearError();
   // The worker drops its stage on any convert; the CLIENT-side checkpoint must
   // die with it, or its Accept button would re-enable into a guaranteed
@@ -547,6 +569,8 @@ function handleJobResult(p) {
 }
 
 function resetEditorState() {
+  importSeq += 1;          // an import begun against the old board must not land
+  jsonBufferRevision += 1;
   lastAppliedPosition = null;
   lastAppliedJson = "";
   lastGeom = null;
@@ -1513,6 +1537,7 @@ let drawQueued = false;
 
 function openPicker() {
   if (!pendingRGB || !decodedCanvas || workerOccupied) return; // M2: never mid-job
+  if (workerDead) { setStatus("辨識引擎已停止，請重新整理頁面。"); return; }
   clearError();
   // The prior result stays visible below the picker (review M4): 返回 merely
   // hides this section again, losing nothing.
@@ -1740,8 +1765,10 @@ function invalidatePreview(reason) {
   canvas.height = 0;
   section.hidden = true;
   $("checkpoint-status").textContent = "";
-  if (reason === "retry" || focusWasInside) {
-    if (pendingRGB && decodedCanvas) {
+  // "reselect" means the image itself changed: pickerCorners are null and
+  // reopening would hand the pointer handlers a null quad (r12 B-5).
+  if (reason !== "reselect" && (reason === "retry" || focusWasInside)) {
+    if (pendingRGB && decodedCanvas && pickerCorners) {
       $("picker-section").hidden = false;
       drawPicker();
       pickerCanvas.focus();

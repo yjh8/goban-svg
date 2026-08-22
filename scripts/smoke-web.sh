@@ -30,8 +30,15 @@ W=$(echo "$CFG" | sed -nE 's/export const WHEEL = "([^"]+)".*/\1/p')
 # Pages returns 200 + index.html for missing paths, so identify by CONTENT (r11).
 curl -fsSL "$BASE/wheels/$W" -o "$TMPD/w.bin" 2>/dev/null || fail "wheel $W not fetchable"
 [ "$(head -c 2 "$TMPD/w.bin")" = "PK" ] || fail "wheel $W is not served (got a non-zip body — Pages fallback)"
-curl -fsSI "$BASE/pyodide/pyodide.mjs" | grep -q "200" || fail "pyodide.mjs not fetchable"
-curl -fsSI "$BASE/pyodide/pyodide.asm.wasm" | grep -q "200" || fail "wasm not fetchable"
+# Same Pages fallback trap: a MISSING runtime file also answers 200 + HTML, so
+# a status check would smoke green on a site that cannot boot (r12 B-3).
+curl -fsSL "$BASE/pyodide/pyodide.mjs" -o "$TMPD/pyodide.mjs" || fail "pyodide.mjs not fetchable"
+grep -q "loadPyodide" "$TMPD/pyodide.mjs" || fail "pyodide.mjs is not the runtime module (Pages fallback body)"
+curl -fsSL "$BASE/pyodide/pyodide.asm.wasm" -o "$TMPD/pyodide.wasm" || fail "wasm not fetchable"
+[ "$(head -c 4 "$TMPD/pyodide.wasm" | od -An -tx1 | tr -d ' \n')" = "0061736d" ] \
+  || fail "pyodide.asm.wasm is not a wasm module (Pages fallback body)"
+curl -fsSL "$BASE/pyodide/python_stdlib.zip" -o "$TMPD/stdlib.zip" || fail "python_stdlib.zip not fetchable"
+[ "$(head -c 2 "$TMPD/stdlib.zip")" = "PK" ] || fail "python_stdlib.zip is not a zip (Pages fallback body)"
 curl -fsS "$BASE/" | grep -q "棋譜圖" || fail "index content unexpected"
 
 # --- published wheel archive: every URL still serves its original bytes ---

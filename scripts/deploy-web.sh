@@ -44,8 +44,17 @@ live_wheel_sha() {
   if ! code=$(curl -sS -L -o "$tmp" -w '%{http_code}' "$url"); then
     rm -f "$tmp"; return 1
   fi
-  if [ "$code" != "200" ] || [ "$(head -c 2 "$tmp")" != "PK" ]; then
-    rm -f "$tmp"; echo ABSENT; return 0
+  # THREE states, never two: an outage must not read as "absent" and authorize
+  # a rewrite (r12 B-1). Absence is proven ONLY by the known Pages fallback:
+  # HTTP 200 whose body is the site's own HTML, not a zip.
+  if [ "$code" != "200" ]; then
+    rm -f "$tmp"; echo INDETERMINATE; return 0
+  fi
+  if [ "$(head -c 2 "$tmp")" != "PK" ]; then
+    if head -c 200 "$tmp" | grep -qi "<!doctype html"; then
+      rm -f "$tmp"; echo ABSENT; return 0
+    fi
+    rm -f "$tmp"; echo INDETERMINATE; return 0
   fi
   sha256_of "$tmp"
   rm -f "$tmp"
@@ -136,8 +145,13 @@ if [ -f "$ARCHIVE/$WHEEL" ]; then
       exit 1
     fi
     [ "$RA_SHA" = "ABSENT" ] || {
-      echo "$LIVE_BASE/wheels/$WHEEL serves a real wheel ($RA_SHA) — it IS published; refusing to re-archive" >&2
-      echo "Bump the version instead: published wheel bytes are immutable." >&2
+      if [ "$RA_SHA" = "INDETERMINATE" ]; then
+        echo "$LIVE_BASE/wheels/$WHEEL gave an indeterminate response (outage? proxy?) — refusing to re-archive" >&2
+        echo "Absence must be PROVEN before archived bytes may be replaced." >&2
+      else
+        echo "$LIVE_BASE/wheels/$WHEEL serves a real wheel ($RA_SHA) — it IS published; refusing to re-archive" >&2
+        echo "Bump the version instead: published wheel bytes are immutable." >&2
+      fi
       exit 1
     }
     cp "$WHEEL_PATH" "$ARCHIVE/$WHEEL"
@@ -184,7 +198,7 @@ else
 fi
 
 echo "== pyodide ${PYODIDE_VERSION} (self-hosted core, sha256-pinned)"
-if [ ! -f "$CACHE/pyodide.mjs" ]; then
+if ! [ -f "$CACHE/pyodide.mjs" ] || ! [ -f "$CACHE/pyodide.asm.wasm" ] || ! [ -f "$CACHE/python_stdlib.zip" ] || ! [ -f "$CACHE/pyodide.asm.mjs" ] || ! [ -f "$CACHE/pyodide-lock.json" ]; then
   TMP_TAR=$(mktemp)
   TMP_DIR=$(mktemp -d)
   curl -fsSL "https://github.com/pyodide/pyodide/releases/download/${PYODIDE_VERSION}/pyodide-core-${PYODIDE_VERSION}.tar.bz2" -o "$TMP_TAR"
@@ -217,7 +231,10 @@ export const WHEEL = "${WHEEL}";
 export const APP_VERSION = "${APP_VERSION}";
 export const PYODIDE_VERSION = "${PYODIDE_VERSION}";
 EOF
-for f in index.html app.js worker.js style.css _headers "wheels/$WHEEL" pyodide/pyodide.mjs gen/config.js; do
+for f in index.html app.js worker.js style.css _headers "wheels/$WHEEL" gen/config.js \
+         pyodide/pyodide.mjs pyodide/pyodide.asm.mjs pyodide/pyodide.asm.wasm \
+         pyodide/python_stdlib.zip pyodide/pyodide-lock.json \
+         assets/corner-correct.png assets/corner-wrong.png; do
   [ -f "web-dist/$f" ] || { echo "staging incomplete: web-dist/$f missing" >&2; exit 1; }
 done
 while IFS= read -r name; do
@@ -251,6 +268,10 @@ if [ "$DEPLOY_MODE" = 1 ]; then
       echo "LIVE $LIVE_BASE/wheels/$name — transport failure (DNS/TLS/timeout); refusing to deploy" >&2
       exit 1
     fi
+    [ "$got" != "INDETERMINATE" ] || {
+      echo "LIVE $LIVE_BASE/wheels/$name gave an indeterminate response — refusing to deploy" >&2
+      exit 1
+    }
     if [ "$got" = "ABSENT" ]; then
       # Absent is legal ONLY for the wheel this run introduces, and only once the
       # live site is proven to be serving a different (older) version.
