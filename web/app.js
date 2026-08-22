@@ -122,10 +122,12 @@ function onWorkerMessage(event) {
     setStatus("辨識引擎已就緒。");
     $("version-line").textContent = `goban-svg v${msg.appVersion} · Pyodide ${msg.pyodideVersion}`;
     updateConvertEnabled();
-    refreshPhotoConvertEnabled();
+    setBusy(false); // readiness changed: re-derive every control + ARIA (r10 B-7)
     return;
   }
   if (msg.type === "boot-error") { workerFailed(msg.message); return; }
+  // (setBusy on both the ready and failure transitions keeps control state and
+  // ARIA in step with canRun — see workerFailed and the "ready" branch above.)
 
   if (msg.type === "photo-preview-result") { handlePreviewResult(msg); return; }
   if (msg.type === "photo-commit-result") { handleCommitResult(msg); return; }
@@ -208,6 +210,12 @@ function intakeAllowed() {
     setStatus("辨識中，請等目前這張圖跑完再換圖。");
     return false;
   }
+  // Unapplied JSON edits would be destroyed by a new image (r10 B-4); the
+  // 捨棄 button is the one-click escape.
+  if (jsonDirty) {
+    setStatus("JSON 已修改尚未套用 — 請先「套用修正」或「捨棄 JSON 修改」，再換圖。");
+    return false;
+  }
   return true;
 }
 
@@ -256,6 +264,13 @@ async function acceptFile(file) {
   $("picker-section").hidden = true;
   $("photo-mode-link").hidden = true;
   $("monitor-hint-upload").hidden = true;
+  // Drop the OLD preview now: every validation/decode failure below returns
+  // early, which used to leave the previous image on screen beside a
+  // just-cleared state (r10 B-6).
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  $("preview").hidden = true;
+  $("preview").removeAttribute("src");
+  $("dropzone-text").textContent = "拖曳圖片到這裡，或點擊選擇檔案";
   invalidatePreview("reselect");
   updateConvertEnabled();
   if (file.size > MAX_FILE_BYTES) {
@@ -314,7 +329,7 @@ async function acceptFile(file) {
 
   const preview = $("preview");
   if (previewUrl) URL.revokeObjectURL(previewUrl); // review M5: one live preview URL only
-  previewUrl = URL.createObjectURL(file);
+  previewUrl = URL.createObjectURL(file); // the new one, only now that decode succeeded
   preview.src = previewUrl;
   preview.hidden = false;
   $("dropzone-text").textContent = `已選擇：${file.name}（辨識尺寸 ${w}×${h}）— 點擊可更換`;
@@ -327,13 +342,18 @@ async function acceptFile(file) {
 }
 
 function updateConvertEnabled() {
-  convertBtn.disabled = !(workerReady && pendingRGB && !workerOccupied);
+  // Never while dirty: a fresh extraction replaces the textarea wholesale, so
+  // unapplied edits would vanish silently (r10 B-4).
+  convertBtn.disabled = !(workerReady && pendingRGB && !workerOccupied && !jsonDirty);
 }
 
 /* ---------------------------------------------------------------- convert */
 
 function setBusy(busy) {
-  const frozen = busy || jsonDirty;
+  // Editor controls follow the SAME predicate canRun() enforces, worker
+  // readiness included — otherwise a dead worker leaves buttons enabled and
+  // aria-disabled lying while every action is refused (r10 B-7).
+  const frozen = busy || jsonDirty || !workerReady;
   convertBtn.disabled = busy || !(workerReady && pendingRGB);
   $("rerender-btn").disabled = busy || !jsonDirty || !lastAppliedPosition;
   // Freeze correction inputs during a run so a mid-flight edit can't be
@@ -372,6 +392,7 @@ function refreshPhotoConvertEnabled() {
 
 convertBtn.addEventListener("click", () => {
   if (!pendingRGB || workerOccupied) return; // review M2: state gate, not just the DOM attribute
+  if (jsonDirty) { blockedNotice(); return; } // r10 B-4
   clearError();
   // The worker drops its stage on any convert; the CLIENT-side checkpoint must
   // die with it, or its Accept button would re-enable into a guaranteed
@@ -631,7 +652,7 @@ function renderWarnings() {
     } else if (mine.some((r) => GEOMETRY_KINDS.has(r.kind)) && editorProvenance === "photo") {
       const tag = document.createElement("span");
       tag.className = "review-tag geometry";
-      tag.textContent = "（棋盤定位問題 — 建議「重新點角」後重新辨識）";
+      tag.textContent = "（棋盤定位問題 — 建議用上方「實體棋盤照片？改用照片模式」重新點角後再辨識）";
       li.appendChild(tag);
     }
     wl.appendChild(li);
@@ -1241,7 +1262,7 @@ function openInspector(notation) {
     reasons.push("手數標記請用下方「修正辨識結果」的 JSON 編輯器修改。");
   }
   if (reviews.some((r) => GEOMETRY_KINDS.has(r.kind))) {
-    reasons.push("這個點的棋盤定位不可靠 — 建議按「重新點角」重新辨識。");
+    reasons.push("這個點的棋盤定位不可靠 — 建議用上方「實體棋盤照片？改用照片模式」重新點角後再辨識。");
   }
   if (!reasons.length) reasons.push(describePoint(notation));
   $("inspector-reason").textContent = reasons.join("　");
@@ -1284,13 +1305,17 @@ function positionInspector() {
   box.style.setProperty("top", `${ty}px`);
 }
 
+/* `returnFocus` defaults to "restore if focus is currently inside me" — an async
+ * close (a slow import resolving, a transaction committing) must never hide the
+ * element that has focus and leave it nowhere (r9 B-3, r10 B-5). */
 function closeInspector(returnFocus) {
   const box = $("inspector");
   if (!box) return;
   const wasOpen = !box.hidden;
+  const held = wasOpen && box.contains(document.activeElement);
   box.hidden = true;
   inspectorPoint = null;
-  if (wasOpen && returnFocus) $("board-grid").focus();
+  if (wasOpen && (returnFocus === undefined ? held : returnFocus)) $("board-grid").focus();
 }
 
 function wireInspectorButton(id, handler) {
@@ -1349,11 +1374,19 @@ function setEditorJson(text) {
   setDirty(false);
 }
 
+/* Dirty is DERIVED, never asserted: editing back to the applied text clears it,
+ * which is what makes the 「改回原內容」 escape real (r10 B-4). */
+function recomputeDirty() {
+  setDirty($("json-editor").value !== lastAppliedJson);
+}
+
 function setDirty(value) {
   jsonDirty = value;
   $("dirty-badge").hidden = !value;
   $("rerender-btn").disabled = workerOccupied || !value || !lastAppliedPosition;
+  $("discard-json-btn").disabled = workerOccupied || !value || !lastAppliedPosition;
   updateUndoButton();
+  updateConvertEnabled(); // a dirty buffer blocks re-extraction (r10 B-4)
   $("board-wrap").classList.toggle("frozen", value || workerOccupied);
   $("board-grid").setAttribute("aria-disabled", String(value || workerOccupied || !lastAppliedPosition));
   for (const id of ["coord-empty", "coord-black", "coord-white"]) {
@@ -1366,7 +1399,16 @@ $("json-editor").addEventListener("input", () => {
   if (settingEditor) return;
   jsonBufferRevision += 1;
   noteEditorMutation(); // typed text is editor state a commit would overwrite
-  setDirty(true);
+  recomputeDirty();
+});
+
+/* The one-click way out of a dirty buffer, so blocking re-extraction while
+ * dirty can never trap a user who pasted something unusable (r10 B-4). */
+$("discard-json-btn").addEventListener("click", () => {
+  if (workerOccupied || !jsonDirty || !lastAppliedPosition) return;
+  setEditorJson(lastAppliedJson);
+  setStatus("已捨棄 JSON 修改，恢復目前盤面內容。");
+  announceMutation("已捨棄 JSON 修改。");
 });
 
 $("rerender-btn").addEventListener("click", () => {

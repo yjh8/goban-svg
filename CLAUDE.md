@@ -29,10 +29,13 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
 - **Codex `ultra` review gate** (gpt-5.6-sol) applies to any substantive code or design
   change before it lands (docs-only edits exempt). **Always run it via
   `scripts/codex-review.sh`** — per-project `CODEX_HOME` under
-  `~/.codex-homes/<basename>-<path-hash>/` (auth is a SYMLINK, never a copy), a
-  default-deny permission profile that makes `~/.ssh` / `~/.aws` / `~/.codex`
-  unreadable to the review while granting the repo + toolchain,
-  `--ignore-user-config`, detached, prompt on stdin. Sharing `~/.codex` with
+  `~/.codex-homes/<basename>-<path-hash>/` (auth is a SYMLINK, never a copy) and
+  a default-deny boundary for anything the model runs: filesystem root denied,
+  re-granting only the repo, toolchain (minus `/opt/homebrew/var`) and
+  `~/.gitconfig`, so `~/.ssh` / `~/.aws` / `~/.codex` are unreadable; command
+  network disabled; environment inherited as `core` only with `*TOKEN*`-style
+  names excluded; `--ignore-user-config`; `--strict-config`; detached; prompt on
+  stdin. Every clause probe-verified (r7–r10). Sharing `~/.codex` with
   ChatGPT.app killed four long runs mid-flight on 2026-08-21.
 - New top-level files/dirs get a `## Repository layout` row in `README.md` in the same commit.
 - Transient artifacts go in `outputs/` (gitignored). Anything cited as a source of truth lives in `docs/` (tracked).

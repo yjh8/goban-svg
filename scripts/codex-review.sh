@@ -47,16 +47,32 @@ MODEL=${CODEX_REVIEW_MODEL:-gpt-5.6-sol}
 EFFORT=${CODEX_REVIEW_EFFORT:-ultra}
 
 # Default-deny filesystem, then re-grant exactly what a review needs:
-#   :minimal        runtime essentials codex itself requires
+#   :minimal         runtime essentials codex itself requires
 #   :workspace_roots the repo under review
-#   toolchain       node / python / git / system libraries
-#   ~/.gitconfig    or `git log` fails with a bare "permission denied"
-# Everything else — notably ~/.ssh, ~/.aws, ~/.codex — stays denied.
+#   toolchain        node / python / git / system libraries
+#   ~/.gitconfig     or `git log` fails with a bare "permission denied"
+# Everything else — notably ~/.ssh, ~/.aws, ~/.codex — stays denied. Refinements
+# from r10 B-2/B-3, each probe-verified:
+#   - /opt/homebrew/var is denied INSIDE the homebrew grant: it holds service
+#     data (postgres clusters, logs, caches), not toolchain. /opt/homebrew/etc
+#     stays readable because node loads openssl.cnf from it — config, not data.
+#   - /private/tmp is not granted at all: prompts are read by the PARENT
+#     process, never by a model command.
+#   - ~/.gitconfig uses the literal ~ so a HOME containing a quote or backslash
+#     cannot break the TOML.
 PERM_FS="permissions.review-readonly.filesystem={\
 \":root\"=\"deny\",\":minimal\"=\"read\",\":workspace_roots\"={\".\"=\"read\"},\
-\"/opt/homebrew\"=\"read\",\"/Library/Developer\"=\"read\",\"/usr\"=\"read\",\
-\"/bin\"=\"read\",\"/System\"=\"read\",\"/private/tmp\"=\"read\",\
-\"$HOME/.gitconfig\"=\"read\"}"
+\"/opt/homebrew\"=\"read\",\"/opt/homebrew/var\"=\"deny\",\
+\"/Library/Developer\"=\"read\",\"/usr\"=\"read\",\
+\"/bin\"=\"read\",\"/System\"=\"read\",\
+\"~/.gitconfig\"=\"read\"}"
+
+# Codex 0.144.1 defaults to inherit=all with default excludes OFF, so every
+# exported *_TOKEN / *_KEY in the launching shell is visible to `env` inside a
+# model command (r10 B-1). Inherit only core vars, re-enable the name-based
+# excludes, and forbid a login shell from re-sourcing a profile that would put
+# them back.
+PERM_ENV='shell_environment_policy={inherit="core",ignore_default_excludes=false,exclude=["*TOKEN*","*KEY*","*SECRET*","*PASSWORD*","*CREDENTIAL*","AWS_*","GH_*","GITHUB_*","OPENAI_*","ANTHROPIC_*"]}'
 
 seed() {
   [ -f "$HOME/.codex/auth.json" ] || { echo "missing ~/.codex/auth.json — run 'codex login' first" >&2; exit 1; }
@@ -99,6 +115,7 @@ echo "   CODEX_HOME=$HOME_DIR (per-project, outside every repo)"
 read -r PID OUT < <(
   CODEX_HOME="$HOME_DIR" REVIEW_OUT="$OUT_ARG" REVIEW_MODEL="$MODEL" \
   REVIEW_EFFORT="$EFFORT" REVIEW_PROMPT="$PROMPT_FILE" REVIEW_PERM_FS="$PERM_FS" \
+  REVIEW_PERM_ENV="$PERM_ENV" \
   python3 - <<'PY'
 import os, subprocess, sys, tempfile, time
 
@@ -125,7 +142,9 @@ p = subprocess.Popen(
      "-c", f'model_reasoning_effort="{os.environ["REVIEW_EFFORT"]}"',
      "-c", 'default_permissions="review-readonly"',
      "-c", os.environ["REVIEW_PERM_FS"],
+     "-c", os.environ["REVIEW_PERM_ENV"],
      "-c", "permissions.review-readonly.network.enabled=false",
+     "--strict-config",  # a malformed -c must fail loudly, not silently degrade
      "-"],
     stdout=out, stderr=subprocess.STDOUT, stdin=prompt,
     start_new_session=True,
