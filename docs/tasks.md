@@ -7,13 +7,10 @@
    (photo-mode-design.md) + `examples/board-4` fixture (the same program's true
    screenshot extracts perfectly). Joseph is now collecting REAL physical-board photos
    from staff — that corpus unblocks the H1–H3 calibration hypotheses.
-2. **Correction editor + photo-confidence UX trio (D-007)** — IMPLEMENTED +
-   locally E2E-verified. Design survived two Codex ultra REJECT rounds (25
-   findings folded into the v3 contract); build ran as a 5-agent workflow with
-   two independent verify lenses (2 MAJOR + 12 MINOR, all fixed). Ships as
-   0.1.1 with the D-008 immutable wheel archive. Remaining: Codex ultra code
-   cascade (in flight) → address findings → commit+push → deploy → post-deploy
-   smoke + live E2E.
+2. **Correction editor + photo-confidence UX trio (D-007)** — ✅ SHIPPED
+   2026-08-22 as v0.1.1, live at goban-svg.pages.dev, smoke green, E2E verified
+   on the deployed site. Gate: APPROVE-1 after 12 review rounds. Next: staff
+   verification of the editor itself.
 
 ## Backlog
 

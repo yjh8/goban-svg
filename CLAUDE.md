@@ -16,6 +16,14 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
   addressed. Read `docs/build-learnings.md`, `docs/decisions.md`, and `docs/design.md`
   § "Post-migration amendments" before touching the extractor; the design doc's original
   §6 wedge/bbox text is superseded by D-002.
+- **2026-08-22 — v0.1.1 LIVE: correction editor + photo checkpoint (D-007/D-008).**
+  Click an intersection to fix a stone; ringed points open a 判讀 inspector; undo,
+  keyboard editing and a coordinate form throughout. Photo mode now shows the
+  rectified board + detected grid for confirmation BEFORE committing a result.
+  Re-running recognition over corrections asks first. Published wheel URLs are
+  immutable (`web/wheels/` archive + manifest; deploy verifies the live site).
+  Shipped after a 12-round Codex review arc — see `session_logs/2026-08-22-session.md`
+  for what that caught and what it cost.
 - **2026-08-19 evening — web app phase 1 LIVE at https://goban-svg.pages.dev (D-005):**
   static Cloudflare Pages + self-hosted Pyodide runs the wheel in-browser; zh-TW 圍棋
   UI; in-page JSON correction loop; strict CSP. Shared with the 海峰棋院 staff for
@@ -66,5 +74,5 @@ manifest; deploy verifies the LIVE site pre-publish (discovered the 0.1.0 pin in
 the blindspot prompt was already stale — Joseph to notify the author).
 **Infra lesson:** ChatGPT.app's codex rewrites `~/.codex/models_cache.json` →
 CLI runs crash mid-flight; fix = isolated `CODEX_HOME` (memory + build-learnings).
-**Open:** deploy verification on staff devices; physical-board photo corpus →
+**Open:** staff verification of the new editor; physical-board photo corpus →
 H1–H3 calibration; phase-2 auth.
