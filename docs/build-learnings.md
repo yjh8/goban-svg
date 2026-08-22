@@ -3,6 +3,50 @@
 > What actually went wrong (failure modes, not just fixes), so the next session doesn't
 > rediscover them. Newest first.
 
+## A spec written for an AI must be trialled BY an AI (2026-08-22)
+
+`upgrade-prompt-for-blindspot.md` was written carefully — hard rules, exact
+FIND/REPLACE hunks, a troubleshooting table — and it still shipped a blocker that
+only surfaced when agents were made to *execute* it blind on a real copy of the
+target baseline.
+
+The defect: §2's A1 hunk anchors on the exact `return` line that §3's B1 rewrites,
+and A1's own preamble said **"apply §3 first if you are doing both."** That is the
+one order that breaks. After B1, A1's FIND text has **zero** matches — and the
+spec's own §8 table reads a 0-match as "already applied, stop", a plausible *wrong*
+diagnosis, since nothing about a widened `_control_char` looks like
+`_no_duplicate_keys` already existing. An agent that then applies A2 (whose anchor
+B1 never touched) ships a `board.py` raising `NameError: _no_duplicate_keys` on
+**every** `Position.from_json()` call — the whole JSON path, not the edge case the
+change was fixing. Reproduced with a real interpreter; both executing agents hit it
+independently. I had written a hazard note that pointed at the cliff instead of
+away from it.
+
+Three more, same trial: an insertion point given as **prose** ("insert above the
+`@dataclass` line that begins `ExtractionResult`") where the bare `@dataclass` it
+names occurs **three times** — phrased as narration, so §0's exactly-once safety
+rule never engaged; a §6 verification that **structurally could not detect** a
+broken EXIF fix, because `read_png` handles PNGs by signature and only non-PNG data
+reaches the Pillow path where the fix lives, so a green report proved nothing; and a
+regression check that assumed fixtures the target codebase has no reason to own.
+
+Rules that came out of it:
+- **A FIND anchor consumed by another hunk in the same spec is an ordering
+  dependency** — state the mandatory order at the anchor, and add the wrong-order
+  symptom to troubleshooting so a 0-match is not misread as "already applied".
+- **Every insertion point is a FIND block, never prose.** Narration bypasses the
+  uniqueness check. Verify each anchor is unique *in its own file*, and scope the
+  edit when the same line exists elsewhere (`from dataclasses import dataclass`
+  also lives in `png_codec.py`).
+- **A verification that cannot fail is not a verification.** Trace whether the check
+  actually reaches the changed code path.
+- **Make checks self-contained.** The regression check now paints a board with
+  `render_png` and asserts `extract_position` reads it back exactly — no external
+  fixture, works in any tree.
+- Re-verify after the fix: the corrected spec was re-executed blind, including a
+  probe where the agent was *told* to do §3 first. It caught the hazard before
+  touching any file.
+
 ## Codex reviews need a PROJECT-LOCAL CODEX_HOME (2026-08-21/22)
 
 Four consecutive ultra code reviews died mid-flight (40 min, 4 min, 30 min, ~2 min)

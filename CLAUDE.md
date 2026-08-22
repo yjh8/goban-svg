@@ -53,6 +53,29 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
 
 > Keep today only; older entries roll to `session_logs/`.
 
+### 2026-08-22 (b) — carry #2 closed: blindspot is a source fork (D-009)
+
+Triaging "notify the blindspot author their hash is stale" turned up three things that
+each reframed the job. **The hash is not enforced anywhere in code** (`worker.js`
+asserts `__version__`, not bytes) — so it was a record correction, not an incident.
+**`0.1.0` was published twice** — build 1 `5964bad5…` (65,760 B, commit `07a1ccb`) vs
+build 2 `02b158f7…` (78,112 B, `c4615de`); the wheel bytes of build 1 are gone but both
+source generations are in git, so the delta IS knowable (photo mode landing 08-20 20:45
+without a version bump = the whole +12,352 B). And **blindspot is a source FORK** —
+夏大銘 老師 adopted the code Thu 2026-08-20 and modified it since, so "upgrade" is a
+cherry-pick, never a URL/hash swap.
+**Shipped `5dd21a1`:** integration spec corrected (overclaim removed, 0.1.1 published,
+phantom string deleted) + **`docs/upgrade-prompt-for-blindspot.md`** — a merge spec for
+his AI, since his first version was built with Claude.
+**The lesson (build-learnings):** a spec written for an AI must be **trialled by an
+AI**. Executing it blind exposed a blocker — an ordering note that recommended the one
+order that breaks, yielding `NameError` on every `from_json()` call — plus a prose
+anchor matching 3 places and a verification that structurally could not fail. Fixed and
+re-verified.
+**Not sent:** the zh-TW note is at `outputs/blindspot-notification-2026-08-22.md`
+(gitignored, this machine only). Joseph owns the send.
+**Paused here** — capability demo, token-constrained week.
+
 ### 2026-08-22 — v0.1.1 SHIPPED: correction editor + photo checkpoint live (D-007/D-008)
 
 **Live** at goban-svg.pages.dev; smoke green (both published wheels hash-verified);

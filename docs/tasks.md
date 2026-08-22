@@ -12,6 +12,13 @@
    on the deployed site. Gate: APPROVE-1 after 12 review rounds. Next: staff
    verification of the editor itself.
 
+3. **Blindspot outreach — DRAFTED, NOT SENT.** Carry #2 closed on the engineering
+   side (D-009, commit `5dd21a1`): `docs/upgrade-prompt-for-blindspot.md` is the
+   trialled merge spec for 夏老師's AI, and the zh-TW cover note is at
+   `outputs/blindspot-notification-2026-08-22.md` (**gitignored — this machine
+   only**; also preserved in the session artifact). Joseph owns sending it; he has
+   the direct relationship. Nothing has been sent to any external party.
+
 ## Backlog
 
 1. **Web app, phase 2 (auth)** — Cloudflare Access + Google IdP over production AND
