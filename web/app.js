@@ -712,6 +712,11 @@ function handlePayload(p, opts) {
     history = [];
     historyBytes = 0;
     editorProvenance = o.provenance || null;
+    // A fresh extraction has no corrections, so any pending confirmation is now
+    // meaningless — restore both labels before installing the new baseline,
+    // or a control can read 確定要重新辨識？ over a pristine board (r16 B-1).
+    disarmReExtract();
+    $("picker-status").textContent = "";
     extractionBaselineJson = p.json; // the un-corrected board this session started from
     photoRefined = o.refined === undefined ? null : o.refined;
     editorRevision += 1;
