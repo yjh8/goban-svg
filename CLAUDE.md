@@ -53,26 +53,22 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
 
 > Keep today only; older entries roll to `session_logs/`.
 
-### 2026-08-21 — staff feedback round 1 → correction editor + photo checkpoint shipped as 0.1.1 (D-007/D-008)
+### 2026-08-22 — v0.1.1 SHIPPED: correction editor + photo checkpoint live (D-007/D-008)
 
-**Morning:** c4615de (fail-closed refine_corners + photo-1 fixture) · 1308c40
-(corner-picker fallback, D-006) — deployed.
-**Evening — feedback round 1 processed:** two staff first-try failures (both
-MONITOR photos) triaged → calibration finding #2 (measured: whites ΔL +8..+16 vs
-floor 20, 9 silent deaths; labeled whites flip BLACK at −134; H1–H3 hypotheses
-parked for the physical corpus Joseph is collecting) + `examples/board-4` (the
-same program's true screenshot extracts perfectly — 4th D-003 fixture).
-**Shipped (D-007):** click-to-cycle correction editor (blindspot-pattern, verified
-live on their deployment) + staged photo extraction with a rectified-grid
-checkpoint + corner-placement guidance, as **0.1.1** with additive
-`ExtractionResult.uncertain` + `PhotoArtifact` APIs. Design took TWO Codex ultra
-REJECT rounds (25 findings → v3 contract); build = 5-agent workflow + 2 verify
-lenses (14 findings fixed); code review r5 REJECT 0-BLOCKER (7 MAJOR + 5 MINOR,
-all fixed); Chrome E2E passed twice (pre- and post-fix). 486 tests.
-**D-008:** published wheel URLs immutable — tracked `web/wheels/` archive +
-manifest; deploy verifies the LIVE site pre-publish (discovered the 0.1.0 pin in
-the blindspot prompt was already stale — Joseph to notify the author).
-**Infra lesson:** ChatGPT.app's codex rewrites `~/.codex/models_cache.json` →
-CLI runs crash mid-flight; fix = isolated `CODEX_HOME` (memory + build-learnings).
-**Open:** staff verification of the new editor; physical-board photo corpus →
-H1–H3 calibration; phase-2 auth.
+**Live** at goban-svg.pages.dev; smoke green (both published wheels hash-verified);
+E2E confirmed on the deployed site (board-4 exact, click-to-edit, re-extract guard,
+undo). Gate: **APPROVE-1** at xhigh after a 12-round review arc — receipt stamped.
+**Shipped:** click-to-cycle editor (kind-aware review rings, point inspector, undo,
+role=grid keyboard + coordinate form) · staged photo extraction with a
+rectified-grid checkpoint · corner-placement guidance · additive engine APIs
+(`uncertain`, `PhotoArtifact`, `geom`) · duplicate-key + surrogate rejection in
+board.py · D-008 immutable published wheel URLs (archive + manifest + live
+pre-deploy verification + `--rearchive`).
+**Review infra:** `scripts/codex-review.sh` — per-project out-of-tree CODEX_HOME,
+symlinked auth, default-deny permission profile, filtered env, detached, stdin
+prompt. Effort default ultra → **xhigh** (Joseph, token burn).
+**Cost lesson (recorded):** the product was clean by review round 3; rounds 4–9
+were almost entirely about the review wrapper written mid-session. Decouple
+infrastructure hardening from a user-facing ship next time.
+**Open:** staff photos arriving tonight → H1–H3 calibration; staff verification of
+the editor; notify go-blindspot author (stale 0.1.0 pin); phase-2 auth.
