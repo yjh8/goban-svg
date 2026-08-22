@@ -26,7 +26,7 @@ Convert an image (photo or screenshot) of a Go board into an SVG file: detect th
 
 - **Python via `uv`** (fleet standard): `uv init` / `uv add <pkg>` / `uv run` — never pip/venv/poetry.
 - **Commit + push to `main` as one motion** — this repo is NOT PR-gated.
-- **Codex `ultra` review gate** (gpt-5.6-sol) applies to any substantive code or design
+- **Codex `xhigh` review gate** (gpt-5.6-sol; was `ultra` — lowered 2026-08-22 for token cost) applies to any substantive code or design
   change before it lands (docs-only edits exempt). **Always run it via
   `scripts/codex-review.sh`** — per-project `CODEX_HOME` under
   `~/.codex-homes/<basename>-<path-hash>/` (auth is a SYMLINK, never a copy) and

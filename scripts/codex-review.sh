@@ -45,7 +45,7 @@ REPO_ROOT=$(pwd -P)
 PROJECT="$(basename "$REPO_ROOT")-$(printf '%s' "$REPO_ROOT" | shasum -a 256 | cut -c1-8)"
 HOME_DIR="$HOME/.codex-homes/$PROJECT"
 MODEL=${CODEX_REVIEW_MODEL:-gpt-5.6-sol}
-EFFORT=${CODEX_REVIEW_EFFORT:-ultra}
+EFFORT=${CODEX_REVIEW_EFFORT:-xhigh}  # Joseph 2026-08-22: ultra burns far more budget
 
 # Default-deny filesystem, then re-grant exactly what a review needs:
 #   :minimal         runtime essentials codex itself requires

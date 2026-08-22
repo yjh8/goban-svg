@@ -155,6 +155,7 @@ function onWorkerMessage(event) {
 // page permanently stuck (review M4). Worker termination is the other thing that
 // clears occupancy (v3 amendment 6).
 function workerFailed(detail) {
+  disarmReExtract(); // r15 B-1
   workerReady = false;
   workerOccupied = false;
   pendingTx = null;
@@ -447,25 +448,50 @@ function canExtract() {
 
 /* Re-running recognition on the SAME image throws away every correction, review
  * decision and undo step, silently and irreversibly (r14 B-1). When work exists,
- * the first press arms and explains; the second press proceeds. Any other action
- * disarms, so the confirmation cannot go stale. */
-let reExtractArmed = false;
+ * the first press arms and explains; the second press proceeds.
+ *
+ * The arm is a TOKEN, not a flag (r15 B-1): it records which control armed it and
+ * the exact state it was armed against, so it cannot be consumed by the other
+ * button, and any change to the board, editor revision or image silently
+ * invalidates it — the user is asked again rather than acting on a stale yes. */
+const CONVERT_LABEL = "轉換成棋譜圖";
+const PHOTO_LABEL = "依角點辨識 → 先確認格線";
+let reExtractArm = null; // {route, json, editorRev, epoch}
+
+/* "Work exists" is not just the undo stack: a size-changing Apply installs a
+ * corrected board and then CLEARS history and reviews, and history is evicted at
+ * its cap — both leave corrections in place with an empty stack (r15 B-2). The
+ * baseline is the JSON of the last fresh extraction; anything else means edits. */
+let extractionBaselineJson = "";
 
 function hasCorrections() {
-  return history.length > 0 || reviewPoints.some((r) => r.status !== "open");
+  if (history.length > 0) return true;
+  if (reviewPoints.some((r) => r.status !== "open")) return true;
+  return !!lastAppliedJson && lastAppliedJson !== extractionBaselineJson;
 }
 
 function disarmReExtract() {
-  if (!reExtractArmed) return;
-  reExtractArmed = false;
-  convertBtn.textContent = "轉換成棋譜圖";
+  if (!reExtractArm) return;
+  reExtractArm = null;
+  convertBtn.textContent = CONVERT_LABEL;
+  $("photo-convert-btn").textContent = PHOTO_LABEL;
 }
 
-function confirmReExtraction() {
-  if (!hasCorrections() || reExtractArmed) { disarmReExtract(); return true; }
-  reExtractArmed = true;
-  convertBtn.textContent = "確定要重新辨識？（會清除修正）";
-  setStatus("重新辨識會清除你已做的修正與復原紀錄 — 再按一次確定，或先下載 JSON 保存。");
+function confirmReExtraction(route) {
+  if (!hasCorrections()) { disarmReExtract(); return true; }
+  const arm = reExtractArm;
+  if (arm && arm.route === route && arm.json === lastAppliedJson
+      && arm.editorRev === editorRevision && arm.epoch === selectionEpoch) {
+    disarmReExtract();
+    return true;
+  }
+  disarmReExtract(); // clear any stale/other-route arm before re-arming
+  reExtractArm = { route, json: lastAppliedJson, editorRev: editorRevision, epoch: selectionEpoch };
+  const btn = route === "photo" ? $("photo-convert-btn") : convertBtn;
+  btn.textContent = "確定要重新辨識？（會清除修正）";
+  const msg = "重新辨識會清除你已做的修正與復原紀錄 — 再按一次確定，或先下載 JSON 保存。";
+  setStatus(msg);
+  if (route === "photo") $("picker-status").textContent = msg; // the picker has its own status line
   announceMutation("重新辨識會清除已做的修正，請再按一次確認。");
   return false;
 }
@@ -611,6 +637,7 @@ function handleJobResult(p) {
 
 function resetEditorState() {
   disarmReExtract();
+  extractionBaselineJson = "";
   importSeq += 1;          // an import begun against the old board must not land
   jsonBufferRevision += 1;
   lastAppliedPosition = null;
@@ -685,6 +712,7 @@ function handlePayload(p, opts) {
     history = [];
     historyBytes = 0;
     editorProvenance = o.provenance || null;
+    extractionBaselineJson = p.json; // the un-corrected board this session started from
     photoRefined = o.refined === undefined ? null : o.refined;
     editorRevision += 1;
     setDirty(false);
@@ -987,13 +1015,13 @@ function blockedNotice() {
  * to every path). Cheap to call anywhere — invalidatePreview() early-returns
  * when nothing is staged. */
 function noteEditorMutation() {
+  disarmReExtract(); // any edit invalidates a pending confirmation (r15 B-1)
   invalidatePreview("editor-mutation");
 }
 
 function beginTransaction(tx) {
   if (!canRun(tx.op)) { blockedNotice(); return false; }
-  disarmReExtract();
-  noteEditorMutation();
+  noteEditorMutation(); // disarms + invalidates the checkpoint
   clearError();
   currentJob += 1;
   currentJobKind = "rerender";
@@ -1855,7 +1883,7 @@ function invalidatePreview(reason) {
 
 $("photo-convert-btn").addEventListener("click", () => {
   if (!canExtract() || !quadIsUsable(pickerCorners)) { blockedNotice(); return; } // r11 B-1
-  if (!confirmReExtraction()) return; // r14 B-1
+  if (!confirmReExtraction("photo")) return; // r14 B-1
   clearError();
   invalidatePreview("newer"); // the worker drops the old stage too, on the newer preview
   currentJob += 1;
