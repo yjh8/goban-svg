@@ -935,8 +935,10 @@ function commitTransaction(tx, p) {
   if (!cursorPoint) cursorPoint = initialCursor();
   // Any inspector still open is showing pre-commit state — its buttons and
   // review list are a snapshot taken before this transaction resolved the
-  // point (r8 B-4). Close it rather than let a stale control act.
-  closeInspector();
+  // point (r8 B-4). Close it rather than let a stale control act; return focus
+  // to the board ONLY if focus is actually inside it, so an async close never
+  // yanks focus out of the coordinate form (r9 B-3).
+  closeInspector($("inspector").contains(document.activeElement));
   renderWarnings();
   renderRefinedLine();
   renderOverlay();

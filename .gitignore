@@ -23,7 +23,7 @@ __pycache__/
 
 # --- Codex review state ---
 # scripts/codex-review.sh keeps per-project CODEX_HOME state in
-# ~/.codex-homes/<project>/ — OUTSIDE the repo, because it holds a copy of
-# auth.json and anything in-tree is inside the review boundary (r7 BLOCKER).
-# This entry remains as a guard against an accidental in-repo home.
+# ~/.codex-homes/<basename>-<path-hash>/ — outside every repo, with auth.json a
+# symlink rather than a copy. This entry guards against an in-repo home being
+# re-introduced by accident (it would sit inside the review boundary).
 /.codex-home/

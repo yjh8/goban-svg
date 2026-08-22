@@ -22,12 +22,18 @@ stdin a clean EOF), `--ignore-user-config` so no personal MCP/plugins load.
 wrapper itself): first `auth.json` was copied INTO the repo — gitignoring stops
 commits, not reads, and the tree is exactly what the agent is pointed at; moving
 the copy outside helped but the next round probed it and showed a same-UID
-`--sandbox read-only` agent can read it anywhere. The resolution is to create no
-second copy at all: `auth.json` is a SYMLINK to `~/.codex/auth.json`. The
-residual risk is inherent and pre-existing — a review agent runs as you and can
-read `~/.ssh`, `~/.aws`, and the original token regardless — so isolation buys
-scope (no personal MCP/plugins, no other projects' sessions), not a filesystem
-sandbox. Treat reviewed repos and prompts as trusted input.
+`--sandbox read-only` agent can read it anywhere. First resolution: create no second copy at
+all — `auth.json` is a SYMLINK to `~/.codex/auth.json`. Then round 5 refuted the
+claim (mine) that the remaining same-UID exposure was unavoidable: it read the
+Codex docs and found PERMISSION PROFILES in the installed CLI. Replacing
+`--sandbox read-only` (which bypasses `default_permissions`) with a default-deny
+filesystem profile makes `~/.ssh`, `~/.aws`, and the original `auth.json`
+"Operation not permitted" to anything the model runs, while the repo and
+toolchain stay readable — verified by probe, twice, including that `node`,
+`pytest` and `git` still work (git needs `~/.gitconfig` explicitly, or it fails
+with a bare "permission denied"). Lesson beyond the mechanism: "that risk is
+inherent" is a claim to CHECK against current docs, not to assert — the reviewer
+found a real mitigation shipping in the version already installed.
 
 Diagnostic order for a review that dies for no reason:
 (1) grep the output for `failed to renew cache TTL`, (2) check whether a session

@@ -13,14 +13,22 @@
 # durations with no obvious cause (four reviews were lost this way). What has to
 # be isolated is that MUTABLE cache/session state — not the credential.
 #
-# CREDENTIAL HANDLING (code review r7/r8). auth.json here is a SYMLINK to
-# ~/.codex/auth.json: the wrapper creates no second copy of an OAuth token, and
-# re-authenticating propagates automatically. Note the residual risk it CANNOT
-# remove: `codex exec --sandbox read-only` runs as your UID and can read any
-# file you can — ~/.codex/auth.json, ~/.ssh, ~/.aws — whether or not this
-# wrapper exists. Isolation and --ignore-user-config shrink what a review sees
-# (no personal MCP servers, plugins, or other projects' sessions); they do not
-# sandbox the filesystem. Treat every reviewed repo and prompt as trusted input.
+# CREDENTIAL HANDLING (code reviews r7/r8/r9). Two layers:
+#
+#   1. No second copy of the token exists: $CODEX_HOME/auth.json is a SYMLINK to
+#      ~/.codex/auth.json, so `codex login` propagates everywhere at once.
+#   2. A PERMISSION PROFILE denies the filesystem root and re-grants only what a
+#      review needs: the repo, the toolchain, and ~/.gitconfig. `~/.ssh`,
+#      `~/.aws`, and the original `~/.codex/auth.json` are "Operation not
+#      permitted" to anything the model runs — verified by probe, not assumed.
+#      This REPLACES `--sandbox read-only`, which bypasses default_permissions
+#      and left the whole home readable.
+#
+# The profile is default-DENY: a new toolchain path may need adding here (the
+# symptom is a review reporting a blocked command), which is the correct
+# direction to fail. Authentication still works because the parent codex process
+# reads auth.json before the profile applies to model-launched commands.
+# https://developers.openai.com/codex/permissions
 #
 # The run is DETACHED (python3 start_new_session; macOS has no setsid) so a
 # supervising agent's task cleanup cannot reap it, and the prompt arrives on
@@ -37,6 +45,18 @@ PROJECT="$(basename "$REPO_ROOT")-$(printf '%s' "$REPO_ROOT" | shasum -a 256 | c
 HOME_DIR="$HOME/.codex-homes/$PROJECT"
 MODEL=${CODEX_REVIEW_MODEL:-gpt-5.6-sol}
 EFFORT=${CODEX_REVIEW_EFFORT:-ultra}
+
+# Default-deny filesystem, then re-grant exactly what a review needs:
+#   :minimal        runtime essentials codex itself requires
+#   :workspace_roots the repo under review
+#   toolchain       node / python / git / system libraries
+#   ~/.gitconfig    or `git log` fails with a bare "permission denied"
+# Everything else — notably ~/.ssh, ~/.aws, ~/.codex — stays denied.
+PERM_FS="permissions.review-readonly.filesystem={\
+\":root\"=\"deny\",\":minimal\"=\"read\",\":workspace_roots\"={\".\"=\"read\"},\
+\"/opt/homebrew\"=\"read\",\"/Library/Developer\"=\"read\",\"/usr\"=\"read\",\
+\"/bin\"=\"read\",\"/System\"=\"read\",\"/private/tmp\"=\"read\",\
+\"$HOME/.gitconfig\"=\"read\"}"
 
 seed() {
   [ -f "$HOME/.codex/auth.json" ] || { echo "missing ~/.codex/auth.json — run 'codex login' first" >&2; exit 1; }
@@ -78,12 +98,15 @@ echo "   CODEX_HOME=$HOME_DIR (per-project, outside every repo)"
 # TRAILING Xs, which is why this is Python's mkstemp and not a shell template.
 read -r PID OUT < <(
   CODEX_HOME="$HOME_DIR" REVIEW_OUT="$OUT_ARG" REVIEW_MODEL="$MODEL" \
-  REVIEW_EFFORT="$EFFORT" REVIEW_PROMPT="$PROMPT_FILE" \
+  REVIEW_EFFORT="$EFFORT" REVIEW_PROMPT="$PROMPT_FILE" REVIEW_PERM_FS="$PERM_FS" \
   python3 - <<'PY'
 import os, subprocess, sys, tempfile, time
 
 want = os.environ["REVIEW_OUT"]
 if want:
+    parent = os.path.dirname(want)
+    if parent:
+        os.makedirs(parent, exist_ok=True)  # explicit nested paths used to work (r9 B-1)
     try:
         fd = os.open(want, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except FileExistsError:
@@ -96,9 +119,13 @@ else:
 out = os.fdopen(fd, "wb")
 prompt = open(os.environ["REVIEW_PROMPT"], "rb")  # stdin: no argv size ceiling, clean EOF
 p = subprocess.Popen(
-    ["codex", "exec", "--sandbox", "read-only", "--ignore-user-config",
+    # NOTE: no --sandbox flag — it bypasses default_permissions (r9).
+    ["codex", "exec", "--ignore-user-config",
      "-c", f'model="{os.environ["REVIEW_MODEL"]}"',
      "-c", f'model_reasoning_effort="{os.environ["REVIEW_EFFORT"]}"',
+     "-c", 'default_permissions="review-readonly"',
+     "-c", os.environ["REVIEW_PERM_FS"],
+     "-c", "permissions.review-readonly.network.enabled=false",
      "-"],
     stdout=out, stderr=subprocess.STDOUT, stdin=prompt,
     start_new_session=True,
