@@ -44,13 +44,22 @@ If the app has a Content-Security-Policy, it must allow:
 If there is no CSP (default for a plain Next.js app), nothing to do.
 
 > **2026-08-21 — corrected wheel hash + wheel URLs are immutable from now on.**
-> The SHA-256 published in earlier copies of this spec (`5964bad5…`) is **stale**: the
-> bytes at that URL were replaced by a later redeploy, back when the deploy script
-> rebuilt and overwrote the wheel in place. The value in the table above
-> (`02b158f7…`) is the sha256 of the bytes `…/wheels/goban_svg-0.1.0-py3-none-any.whl`
-> serves today — verify with `shasum -a 256 <downloaded wheel>`. Nothing in your
-> integration breaks because of this (the wheel is loaded at runtime and the engine's
-> behaviour is unchanged), but if you pinned the old hash anywhere, update it.
+> The SHA-256 published in earlier copies of this spec (`5964bad5…`, 65,760 bytes) is
+> **stale**: the bytes at that URL were replaced by a later redeploy, back when the
+> deploy script rebuilt and overwrote the wheel in place. The value in the table above
+> (`02b158f7…`, 78,112 bytes) is the sha256 of the bytes
+> `…/wheels/goban_svg-0.1.0-py3-none-any.whl` serves today — verify with
+> `shasum -a 256 <downloaded wheel>`. The two builds are **not** byte-identical: the
+> first was built from the 2026-08-19 source (commit `07a1ccb`), the current one from
+> 2026-08-21 (`c4615de`). The original wheel's bytes were never archived, but **both
+> source generations are in git, so the difference is fully known**: the current build
+> adds the `photo.py` module (physical-board photo mode, 656 lines), a `photo` CLI
+> subcommand, and an EXIF-orientation fix in `load_image` for phone JPEGs.
+> **The screenshot recognition path is unchanged between them** — `extract_position`
+> gained only an internal helper used by photo mode, and `board.py`, `render.py`,
+> `sgf.py` and `digits.py` were not touched at all. Nothing in this integration
+> verifies the hash at runtime (§3 asserts `goban_svg.__version__`, not bytes), so
+> nothing breaks either way. But if you pinned the old hash anywhere, update it.
 >
 > **From now on a published wheel URL never changes bytes.** Every released wheel is
 > kept byte-for-byte in a tracked archive with a `SHA256SUMS` manifest; the deploy
@@ -58,15 +67,26 @@ If there is no CSP (default for a plain Next.js app), nothing to do.
 > post-deploy smoke check re-downloads *every* published wheel and verifies its
 > sha256. So the URL + hash in the table above stay valid indefinitely.
 >
-> **New versions get a new URL.** `0.1.1` — purely additive: an
+> **New versions get a new URL.** `0.1.1` **is now published** (2026-08-22) at
+> `https://goban-svg.pages.dev/wheels/goban_svg-0.1.1-py3-none-any.whl`, sha256
+> `ce7b3cb18c8622bd727d2f3cb2c03f9e19fca86153ce9a04778599e1ab800a5c`, 80,727 bytes —
+> verified live against the tracked `SHA256SUMS` manifest. It adds an
 > `ExtractionResult.uncertain` list of `{point, kind}` review points alongside the
 > unchanged `warnings`, plus a `PhotoArtifact` / `extract_photo_artifact()` API for
-> photo mode — will live at
-> `https://goban-svg.pages.dev/wheels/goban_svg-0.1.1-py3-none-any.whl` once it is
-> deployed (ask Joseph for its sha256 then; it is not published as of this note).
-> Every warning string in §7 is frozen byte-for-byte across versions. Upgrading is
-> your own atomic switch of URL + hash + `EXPECTED_VERSION`, on your schedule —
-> staying on 0.1.0 keeps working.
+> photo mode. Both are reached as `from goban_svg.extract import …` /
+> `from goban_svg.photo import …`; the top-level `goban_svg` exports are unchanged.
+> Every warning string in §7 is frozen byte-for-byte across versions — re-verified
+> 0.1.0 → 0.1.1 on the published wheels. Upgrading is your own atomic switch of
+> URL + hash + `EXPECTED_VERSION`, on your schedule — staying on 0.1.0 keeps working.
+>
+> **One caveat if you do upgrade.** 0.1.1 is additive in its API surface, but it also
+> *tightens* `Position.from_json` validation: it now rejects JSON containing a
+> duplicate object key (0.1.0 silently kept the last value and discarded the rest)
+> and a lone UTF-16 surrogate inside a label. Both raise `ValueError`, which §3's
+> `rerender()` already catches generically — so no code change is required, and the
+> visible effect is that a hand-edited paste which used to fail *silently* now shows
+> the existing 「JSON 內容有誤，尚未套用」 message. Worth one manual test of the JSON
+> correction box after switching.
 
 ## §2 — Deliverables (exact file manifest)
 
@@ -721,7 +741,8 @@ fitted a {N}x{N} grid, but positions support sizes 2-25 (the point notation has 
   `white`, `black`); solid square markers on empty points.
 - **Photos of physical boards: experimental.** Perspective/shadows usually raise
   `ExtractionError` — loud failure, never a silently wrong board. Do not promise photo
-  support in UI copy; the provided strings already say 「實驗性支援」.
+  support in UI copy — this component does not implement photo mode at all (see the
+  static-positions-only bullet below), so there is no photo wording to get right.
 - Static positions only — no game replay, no capture resolution.
 
 ## §9 — Acceptance checklist (run ALL before reporting done)
