@@ -650,3 +650,26 @@ def test_ascii_diagram_stone_overrides_star_point_glyph() -> None:
     diagram = ascii_diagram(pos)
     row3 = next(line for line in diagram.splitlines() if line.startswith("3 "))
     assert row3 == "3 . . X . . . + . ."
+
+
+def test_from_json_rejects_duplicate_keys() -> None:
+    # Valid JSON, but plain json.loads keeps only the last bucket and the stones
+    # in the first one vanish before validate() can object (code review r13).
+    text = '{"size": 9, "stones": {"black": ["C3"], "black": ["D4"]}}'
+    with pytest.raises(ValueError, match="duplicate key"):
+        Position.from_json(text)
+
+
+def test_from_json_rejects_duplicate_top_level_keys() -> None:
+    text = '{"size": 9, "size": 19, "stones": {"black": ["C3"]}}'
+    with pytest.raises(ValueError, match="duplicate key"):
+        Position.from_json(text)
+
+
+def test_label_rejects_lone_surrogate() -> None:
+    # Survives Python and reaches render_svg, but a browser Blob rewrites it to
+    # U+FFFD -- the downloaded SVG would not match its JSON (code review r13).
+    pos = Position(size=9)
+    pos.labels[Point.parse("C3")] = "\ud800"
+    with pytest.raises(ValueError, match="U\\+D800"):
+        pos.validate()

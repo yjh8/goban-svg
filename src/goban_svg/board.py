@@ -122,8 +122,30 @@ def _is_valid_mark_color(color: str) -> bool:
 
 
 def _control_char(text: str) -> str | None:
-    """First C0 control character in `text` (ord < 0x20), or None if there is none."""
-    return next((ch for ch in text if ord(ch) < 0x20), None)
+    """First character in `text` that XML cannot carry, or None.
+
+    C0 controls (ord < 0x20) plus lone UTF-16 surrogates (U+D800-U+DFFF). The
+    surrogates matter because they survive Python and reach render_svg, but a
+    browser's Blob/TextEncoder silently rewrites them to U+FFFD -- the SVG the
+    user downloads would differ from the JSON that produced it, with no error
+    anywhere (code review r13).
+    """
+    return next((ch for ch in text if ord(ch) < 0x20 or 0xD800 <= ord(ch) <= 0xDFFF), None)
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """json object hook: a repeated key is an error, not a silent last-wins.
+
+    ``{"black": ["C3"], "black": ["D4"]}`` is valid JSON, and plain json.loads
+    would keep only the second bucket -- discarding stones before validation
+    ever sees them (code review r13).
+    """
+    seen: dict[str, object] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r} in JSON object -- board data would be silently discarded")
+        seen[key] = value
+    return seen
 
 
 @dataclass
@@ -190,7 +212,7 @@ class Position:
             control = _control_char(text)
             if control is not None:
                 raise ValueError(
-                    f"label at {point.notation()} contains control character U+{ord(control):04X} "
+                    f"label at {point.notation()} contains character U+{ord(control):04X} "
                     f"(not expressible in XML): {text!r}"
                 )
 
@@ -337,7 +359,7 @@ class Position:
     @classmethod
     def from_json(cls, text: str) -> Position:
         """Parse JSON text produced by to_json() (or hand-authored to the schema)."""
-        return cls.from_json_dict(json.loads(text))
+        return cls.from_json_dict(json.loads(text, object_pairs_hook=_no_duplicate_keys))
 
 
 def star_points(size: int) -> frozenset[Point]:

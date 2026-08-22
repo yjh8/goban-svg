@@ -254,7 +254,7 @@ fileInput.addEventListener("change", () => {
 function rejectCandidate(mainZh, detail) {
   candidateDecoding = false;
   refreshControls(); // the old session is unfrozen — it was never replaced
-  showError(mainZh, detail);
+  showError(workerDead ? `${mainZh}（辨識引擎已停止，請重新整理頁面）` : mainZh, detail);
   setStatus(pendingRGB ? "已保留目前的圖片與盤面，未更換。" : "");
 }
 
@@ -268,12 +268,13 @@ function looksHeic(file) {
  * corrections and undo history by the time the error was shown. */
 async function acceptFile(file) {
   if (!intakeAllowed()) return; // the guard, again, at the function itself
-  clearError();
+  if (!workerDead) clearError(); // a dead engine's reload guidance must persist (r13 B-2)
   // A candidate attempt id — NOT the session epoch. Bumping the session epoch
   // here would destroy a live checkpoint before we know the file is even
   // usable (r12 B-4); only a successful commit changes the session.
   candidateSeq += 1;
   const attempt = candidateSeq;
+  importSeq += 1; // any import still reading a file is now stale (r13 B-1)
   candidateDecoding = true;
   refreshControls(); // freeze the OLD session while we decode (r12 B-2)
   setStatus("讀取圖片中…");
@@ -916,8 +917,14 @@ window.addEventListener("resize", () => {
 /* ONE transaction entry point with per-operation predicates (v3 amendment 4).
  * ops: 'stone' | 'mark' | 'apply' | 'undo'  (a pure review confirmation commits
  * locally — it changes no JSON, so it never queues a job). */
+/* The session is frozen while a job runs OR a candidate image is decoding: in
+ * both windows an edit belongs to a board that is about to be replaced (r13 B-1).
+ * Every custom handler consults this — disabling native controls is feedback,
+ * not enforcement, because the board and picker are canvas/SVG surfaces. */
+function sessionFrozen() { return workerOccupied || candidateDecoding; }
+
 function canRun(op) {
-  if (workerOccupied) return false;
+  if (sessionFrozen()) return false;
   if (!worker || !workerReady) return false;
   if (op === "apply") return jsonDirty && !!lastAppliedPosition;
   return !jsonDirty && !!lastAppliedPosition && !!lastGeom;
@@ -1485,6 +1492,11 @@ $("json-import").addEventListener("change", async (e) => {
   // manual typing since the read started must all win over this slow import.
   if (epoch !== selectionEpoch) { e.target.value = ""; return; }
   if (myImport !== importSeq) { e.target.value = ""; return; } // superseded, silently
+  if (candidateDecoding) { // a new image is landing; this buffer would be discarded
+    e.target.value = "";
+    setStatus("匯入已取消（正在讀取新圖片），請稍後再匯入一次。");
+    return;
+  }
   if (workerOccupied) {
     e.target.value = "";
     setStatus("匯入已取消（辨識進行中），請稍後再匯入一次。");
@@ -1671,7 +1683,7 @@ function clampToCanvas([x, y]) {
 }
 
 pickerCanvas.addEventListener("pointerdown", (e) => {
-  if (workerOccupied || dragIndex >= 0) return; // M2 + m8: one job, one pointer
+  if (sessionFrozen() || dragIndex >= 0) return; // M2 + m8: one job, one pointer
   const [x, y] = pickerPointFromEvent(e);
   const rect = pickerCanvas.getBoundingClientRect();
   const grabPx = 30 * (pickerCanvas.width / rect.width); // ~30 CSS px hit radius
@@ -1697,6 +1709,7 @@ pickerCanvas.addEventListener("pointerdown", (e) => {
 });
 pickerCanvas.addEventListener("pointermove", (e) => {
   if (dragIndex < 0 || e.pointerId !== activePointerId) return;
+  if (sessionFrozen()) { dragIndex = -1; activePointerId = null; return; } // drag cancelled by a decode
   pickerCorners[dragIndex] = clampToCanvas(pickerPointFromEvent(e));
   touchPhotoInput("corner");
   scheduleDraw();
@@ -1718,7 +1731,7 @@ pickerCanvas.addEventListener("lostpointercapture", endDrag);
 pickerCanvas.addEventListener("keydown", (e) => {
   const step = e.shiftKey ? 10 : 2;
   const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-  if (moves[e.key] && pickerCorners && !workerOccupied) {
+  if (moves[e.key] && pickerCorners && !sessionFrozen()) {
     const [dx, dy] = moves[e.key];
     const [x, y] = pickerCorners[selectedHandle];
     pickerCorners[selectedHandle] = clampToCanvas([x + dx, y + dy]);

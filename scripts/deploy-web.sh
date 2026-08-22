@@ -51,7 +51,9 @@ live_wheel_sha() {
     rm -f "$tmp"; echo INDETERMINATE; return 0
   fi
   if [ "$(head -c 2 "$tmp")" != "PK" ]; then
-    if head -c 200 "$tmp" | grep -qi "<!doctype html"; then
+    # EXACT prefix, not "contains": a body that merely mentions the doctype
+    # must not be read as proof of absence (r13 B-1).
+    if [ "$(head -c 15 "$tmp" | tr "[:upper:]" "[:lower:]")" = "<!doctype html>" ]; then
       rm -f "$tmp"; echo ABSENT; return 0
     fi
     rm -f "$tmp"; echo INDETERMINATE; return 0
